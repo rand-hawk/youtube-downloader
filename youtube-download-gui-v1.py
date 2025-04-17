@@ -6,12 +6,19 @@ from tkinter import ttk, messagebox, filedialog
 from yt_dlp import YoutubeDL
 
 CONFIG_FILE = "config.json"
+ICON_FILE = "youtube-downloader-icon.png"
 
 
 class YouTubeDownloaderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube Downloader")
+        try:
+            if os.path.exists(ICON_FILE):
+                self.root.iconphoto(False, tk.PhotoImage(file=ICON_FILE))
+        except Exception as e:
+            print(f"Could not load icon: {e}")
+
         self.video_entries = []
         self.cancel_requested = False
         self.load_config()
