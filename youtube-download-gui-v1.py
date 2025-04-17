@@ -11,6 +11,7 @@ class YouTubePlaylistDownloader:
         self.video_entries = []
         self.cancel_requested = False
         self.output_dir = os.path.abspath("downloaded_media")
+        self.ffmpeg_path = "c:/ffmpeg/bin"  # Default path
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.setup_widgets()
@@ -25,7 +26,7 @@ class YouTubePlaylistDownloader:
         self.fetch_button = ttk.Button(self.root, text="Fetch Playlist", command=self.fetch_playlist)
         self.fetch_button.pack(pady=5)
 
-        # Checklist Frame (Scrollable)
+        # Checklist Frame
         self.list_frame = tk.Frame(self.root)
         self.canvas = tk.Canvas(self.list_frame, height=200)
         self.scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.canvas.yview)
@@ -49,7 +50,7 @@ class YouTubePlaylistDownloader:
         ttk.Radiobutton(self.root, text="MP3 (Audio)", variable=self.download_type, value="mp3").pack()
         ttk.Radiobutton(self.root, text="MP4 (Video)", variable=self.download_type, value="mp4").pack()
 
-        # Folder selection
+        # Folder Selection
         folder_frame = tk.Frame(self.root)
         folder_frame.pack(pady=5)
         ttk.Label(folder_frame, text="Save to:").pack(side="left")
@@ -57,10 +58,17 @@ class YouTubePlaylistDownloader:
         self.folder_label.pack(side="left", padx=5)
         ttk.Button(folder_frame, text="Choose Folder", command=self.choose_folder).pack(side="left")
 
+        # FFmpeg Path Selection
+        ffmpeg_frame = tk.Frame(self.root)
+        ffmpeg_frame.pack(pady=5)
+        ttk.Label(ffmpeg_frame, text="FFmpeg path:").pack(side="left")
+        self.ffmpeg_label = ttk.Label(ffmpeg_frame, text=self.ffmpeg_path, width=50)
+        self.ffmpeg_label.pack(side="left", padx=5)
+        ttk.Button(ffmpeg_frame, text="Choose FFmpeg", command=self.choose_ffmpeg).pack(side="left")
+
         # Start/Stop Buttons
         self.start_button = ttk.Button(self.root, text="Start Download", command=self.start_download)
         self.start_button.pack(pady=(10, 0))
-
         self.stop_button = ttk.Button(self.root, text="Stop", command=self.stop_download, state="disabled")
         self.stop_button.pack(pady=(5, 10))
 
@@ -73,6 +81,12 @@ class YouTubePlaylistDownloader:
         if folder:
             self.output_dir = folder
             self.folder_label.config(text=self.output_dir)
+
+    def choose_ffmpeg(self):
+        ffmpeg_folder = filedialog.askdirectory()
+        if ffmpeg_folder:
+            self.ffmpeg_path = ffmpeg_folder
+            self.ffmpeg_label.config(text=self.ffmpeg_path)
 
     def fetch_playlist(self):
         playlist_url = self.url_entry.get().strip()
@@ -94,9 +108,8 @@ class YouTubePlaylistDownloader:
                 with YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(playlist_url, download=False)
                     entries = info.get("entries", [])
-
                     for entry in entries:
-                        var = tk.BooleanVar(value=False)  # Unchecked by default
+                        var = tk.BooleanVar(value=False)
                         title = entry.get("title", "Untitled")
                         video_url = f"https://www.youtube.com/watch?v={entry.get('id')}"
                         cb = ttk.Checkbutton(self.checklist_frame, text=title, variable=var)
@@ -134,12 +147,11 @@ class YouTubePlaylistDownloader:
         self.stop_button.config(state="disabled")
 
     def download_videos(self, selected_videos):
-        ffmpeg_path = "C:/ffmpeg/bin"  # <-- Make sure to update this path to where ffmpeg is located
         ydl_opts_mp3 = {
             "format": "bestaudio/best",
             "outtmpl": os.path.join(self.output_dir, "%(title)s.%(ext)s"),
             "ignoreerrors": True,
-            "ffmpeg_location": ffmpeg_path,  # Point to actual ffmpeg binary
+            "ffmpeg_location": self.ffmpeg_path,
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
@@ -154,7 +166,7 @@ class YouTubePlaylistDownloader:
             "merge_output_format": "mp4",
             "outtmpl": os.path.join(self.output_dir, "%(title)s.%(ext)s"),
             "ignoreerrors": True,
-            "ffmpeg_location": ffmpeg_path,  # Point to actual ffmpeg binary
+            "ffmpeg_location": self.ffmpeg_path,
             "postprocessors": [
                 {
                     "key": "FFmpegVideoConvertor",
@@ -166,14 +178,10 @@ class YouTubePlaylistDownloader:
         ydl_opts = ydl_opts_mp3 if self.download_type.get() == "mp3" else ydl_opts_mp4
 
         self.status_label.config(text="Downloading...")
-        self.start_button.config(state="disabled")
-        self.stop_button.config(state="normal")
-
         with YoutubeDL(ydl_opts) as ydl:
             for title, video_url in selected_videos:
                 if self.cancel_requested:
                     break
-
                 self.status_label.config(text=f"Downloading: {title}")
                 try:
                     ydl.download([video_url])
