@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from yt_dlp import YoutubeDL
 
+
 class YouTubePlaylistDownloader:
     def __init__(self, root):
         self.root = root
@@ -11,7 +12,7 @@ class YouTubePlaylistDownloader:
         self.video_entries = []
         self.cancel_requested = False
         self.output_dir = os.path.abspath("downloaded_media")
-        self.ffmpeg_path = "c:/ffmpeg/bin"  # Default path
+        self.ffmpeg_path = "c:/ffmpeg/bin"  # Default FFmpeg path
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.setup_widgets()
@@ -26,7 +27,7 @@ class YouTubePlaylistDownloader:
         self.fetch_button = ttk.Button(self.root, text="Fetch Playlist", command=self.fetch_playlist)
         self.fetch_button.pack(pady=5)
 
-        # Checklist Frame
+        # Playlist Checkboxes
         self.list_frame = tk.Frame(self.root)
         self.canvas = tk.Canvas(self.list_frame, height=200)
         self.scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.canvas.yview)
@@ -43,6 +44,12 @@ class YouTubePlaylistDownloader:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
         self.list_frame.pack(pady=5, fill="x", padx=10)
+
+        # ✅ Select / Deselect All Buttons
+        btn_frame = tk.Frame(self.root)
+        btn_frame.pack(pady=(0, 10))
+        ttk.Button(btn_frame, text="Select All", command=self.select_all).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Deselect All", command=self.deselect_all).pack(side="left", padx=5)
 
         # Format Options
         self.download_type = tk.StringVar(value="mp3")
@@ -127,6 +134,14 @@ class YouTubePlaylistDownloader:
         for widget in self.checklist_frame.winfo_children():
             widget.destroy()
         self.video_entries.clear()
+
+    def select_all(self):
+        for var, _, _ in self.video_entries:
+            var.set(True)
+
+    def deselect_all(self):
+        for var, _, _ in self.video_entries:
+            var.set(False)
 
     def start_download(self):
         selected = [(title, video_url) for var, title, video_url in self.video_entries if var.get()]
