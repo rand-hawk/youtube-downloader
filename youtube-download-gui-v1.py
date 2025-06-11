@@ -8,9 +8,26 @@ import time
 import requests
 from PIL import Image, ImageTk
 from io import BytesIO
+import re
+import pyperclip
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import signal
+import subprocess
 
 CONFIG_FILE = "config.json"
 ICON_FILE = "youtube-downloader-icon.png"
+
+class InterruptibleYoutubeDL(YoutubeDL):
+    """Custom YoutubeDL class that can be interrupted using threading events"""
+    def __init__(self, stop_event, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stop_event = stop_event
+
+    def process_info(self, info_dict):
+        """Override to check for interruption"""
+        if self.stop_event.is_set():
+            raise KeyboardInterrupt("Download interrupted by user")
+        return super().process_info(info_dict)
 
 
 class YouTubeDownloaderApp:
@@ -35,7 +52,42 @@ class YouTubeDownloaderApp:
         self.current_download_index = 0
         self.is_queue_processing = False
 
+        # Clipboard monitoring
+        self.clipboard_monitoring = True
+        self.last_clipboard_content = ""
+        self.clipboard_check_interval = 1000  # milliseconds
+
+        # Concurrent downloads
+        self.max_concurrent_downloads = 2
+        self.download_executor = ThreadPoolExecutor(max_workers=self.max_concurrent_downloads)
+        self.active_downloads = {}
+        self.download_speed_limit = None  # KB/s, None for unlimited
+
+        # Download process control
+        self.active_download_processes = []  # Track active yt-dlp processes
+        self.download_threads = []  # Track download threads
+        self.stop_events = []  # Track stop events for each download
+        self.download_stop_event = threading.Event()  # Global stop event
+
+        # Progress tracking for concurrent downloads
+        self.concurrent_progress = {}  # Track progress of each concurrent download
+        self.total_concurrent_downloads = 0
+        self.completed_concurrent_downloads = 0
+
+        # Dynamic queue management
+        self.initial_queue_size = 0  # Size when download started
+        self.queue_extended = False  # Flag to track if queue was extended
+        self.active_futures = {}  # Track active download futures
+
+        # Resume functionality (will be initialized after config loading)
+        self.partial_downloads_dir = None
+        self.resume_data_file = None
+        self.resume_data = {}  # Track partial downloads
+
         self.load_config()
+
+        # Initialize resume system after config is loaded
+        self.setup_resume_system()
 
         self.setup_widgets()
 
@@ -62,6 +114,14 @@ class YouTubeDownloaderApp:
         self.output_dir = output_dir
         self.ffmpeg_path = ffmpeg_path
 
+        # Load performance settings
+        self.clipboard_monitoring = config.get("clipboard_monitoring", True)
+        self.max_concurrent_downloads = config.get("max_concurrent_downloads", 2)
+        self.download_speed_limit = config.get("download_speed_limit", None)
+
+        # Update thread pool with loaded settings
+        self.download_executor = ThreadPoolExecutor(max_workers=self.max_concurrent_downloads)
+
         # Load saved queue
         saved_queue = config.get("download_queue", [])
         for item in saved_queue:
@@ -79,10 +139,136 @@ class YouTubeDownloaderApp:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def setup_resume_system(self):
+        """Initialize the resume download system"""
+        # Initialize resume paths now that output_dir is available
+        self.partial_downloads_dir = os.path.join(self.output_dir, ".partial_downloads")
+        self.resume_data_file = os.path.join(self.partial_downloads_dir, "resume_data.json")
+
+        # Create partial downloads directory
+        os.makedirs(self.partial_downloads_dir, exist_ok=True)
+
+        # Load existing resume data
+        self.load_resume_data()
+
+        # Check for resumable downloads on startup
+        self.check_resumable_downloads()
+
+    def load_resume_data(self):
+        """Load resume data from file"""
+        if os.path.exists(self.resume_data_file):
+            try:
+                with open(self.resume_data_file, 'r') as f:
+                    self.resume_data = json.load(f)
+            except Exception as e:
+                print(f"Error loading resume data: {e}")
+                self.resume_data = {}
+        else:
+            self.resume_data = {}
+
+    def save_resume_data(self):
+        """Save resume data to file"""
+        try:
+            with open(self.resume_data_file, 'w') as f:
+                json.dump(self.resume_data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving resume data: {e}")
+
+    def check_resumable_downloads(self):
+        """Check for resumable downloads on startup"""
+        if not self.resume_data:
+            return
+
+        resumable_count = 0
+        for url, data in self.resume_data.items():
+            partial_file = data.get('partial_file')
+            if partial_file and os.path.exists(partial_file):
+                resumable_count += 1
+
+        if resumable_count > 0:
+            # Show resume dialog after UI is ready
+            self.root.after(1000, lambda: self.show_resume_dialog(resumable_count))
+
+    def show_resume_dialog(self, count):
+        """Show dialog asking user about resuming downloads"""
+        result = messagebox.askyesno(
+            "Resume Downloads",
+            f"Found {count} interrupted download(s) that can be resumed.\n\n"
+            "Would you like to resume these downloads now?\n\n"
+            "Click 'Yes' to add them to the queue for resuming,\n"
+            "or 'No' to clear the resume data and start fresh."
+        )
+
+        if result:
+            self.add_resumable_to_queue()
+        else:
+            self.clear_resume_data()
+
+    def add_resumable_to_queue(self):
+        """Add resumable downloads to the queue"""
+        added_count = 0
+        for url, data in self.resume_data.items():
+            partial_file = data.get('partial_file')
+            if partial_file and os.path.exists(partial_file):
+                # Create queue item for resume
+                queue_item = {
+                    'url': url,
+                    'title': data.get('title', 'Resuming Download'),
+                    'download_type': data.get('download_type', 'mp4'),
+                    'quality': data.get('quality', 'best'),
+                    'video_info': data.get('video_info', {}),
+                    'available_formats': data.get('available_formats', []),
+                    'status': 'Queued',
+                    'resume_data': data  # Include resume data
+                }
+                self.download_queue.append(queue_item)
+                added_count += 1
+
+        if added_count > 0:
+            self.update_queue_display()
+            self.status_label.config(text=f"Added {added_count} resumable download(s) to queue.")
+
+    def clear_resume_data(self):
+        """Clear all resume data"""
+        self.resume_data = {}
+        self.save_resume_data()
+
+        # Clean up partial files
+        try:
+            for file in os.listdir(self.partial_downloads_dir):
+                if file != "resume_data.json":
+                    file_path = os.path.join(self.partial_downloads_dir, file)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+        except Exception as e:
+            print(f"Error cleaning partial files: {e}")
+
+        self.status_label.config(text="Resume data cleared.")
+
+    def manual_resume_check(self):
+        """Manually check for resumable downloads"""
+        if not self.resume_data:
+            messagebox.showinfo("No Resumes", "No interrupted downloads found.")
+            return
+
+        resumable_count = 0
+        for url, data in self.resume_data.items():
+            partial_file = data.get('partial_file')
+            if partial_file and os.path.exists(partial_file):
+                resumable_count += 1
+
+        if resumable_count > 0:
+            self.show_resume_dialog(resumable_count)
+        else:
+            messagebox.showinfo("No Resumes", "No resumable downloads found.")
+
     def save_config(self):
         config = {
             "output_dir": self.output_dir,
             "ffmpeg_path": self.ffmpeg_path,
+            "clipboard_monitoring": self.clipboard_monitoring,
+            "max_concurrent_downloads": self.max_concurrent_downloads,
+            "download_speed_limit": self.download_speed_limit,
             "download_queue": [
                 {
                     'url': item['url'],
@@ -166,6 +352,36 @@ class YouTubeDownloaderApp:
         self.ffmpeg_label.pack(side="left", padx=5)
         ttk.Button(ffmpeg_frame, text="Choose FFmpeg", command=self.choose_ffmpeg).pack(side="left")
 
+        # Performance and clipboard settings
+        settings_frame = tk.Frame(self.root)
+        settings_frame.pack(pady=5, fill="x", padx=10)
+
+        # Clipboard monitoring
+        clipboard_frame = tk.Frame(settings_frame)
+        clipboard_frame.pack(side="left", fill="x", expand=True)
+
+        self.clipboard_var = tk.BooleanVar(value=self.clipboard_monitoring)
+        self.clipboard_checkbox = ttk.Checkbutton(clipboard_frame, text="Monitor Clipboard for YouTube URLs",
+                                                 variable=self.clipboard_var, command=self.toggle_clipboard_monitoring)
+        self.clipboard_checkbox.pack(anchor="w")
+
+        # Performance settings
+        perf_frame = tk.Frame(settings_frame)
+        perf_frame.pack(side="right")
+
+        ttk.Label(perf_frame, text="Max Downloads:").pack(side="left")
+        self.concurrent_var = tk.StringVar(value=str(self.max_concurrent_downloads))
+        concurrent_spinbox = ttk.Spinbox(perf_frame, from_=1, to=5, width=5, textvariable=self.concurrent_var,
+                                       command=self.update_concurrent_downloads)
+        concurrent_spinbox.pack(side="left", padx=5)
+
+        ttk.Label(perf_frame, text="Speed Limit (KB/s):").pack(side="left", padx=(10, 0))
+        self.speed_limit_var = tk.StringVar(value="" if self.download_speed_limit is None else str(self.download_speed_limit))
+        speed_limit_entry = ttk.Entry(perf_frame, width=8, textvariable=self.speed_limit_var)
+        speed_limit_entry.pack(side="left", padx=5)
+        speed_limit_entry.bind('<Return>', self.update_speed_limit)
+        speed_limit_entry.bind('<FocusOut>', self.update_speed_limit)
+
         # Queue management buttons
         queue_button_frame = tk.Frame(self.root)
         queue_button_frame.pack(pady=5)
@@ -173,6 +389,9 @@ class YouTubeDownloaderApp:
         self.add_to_queue_button.pack(side="left", padx=5)
         self.clear_queue_button = ttk.Button(queue_button_frame, text="Clear Queue", command=self.clear_queue)
         self.clear_queue_button.pack(side="left", padx=5)
+
+        self.resume_button = ttk.Button(queue_button_frame, text="Check for Resumes", command=self.manual_resume_check)
+        self.resume_button.pack(side="left", padx=5)
 
         # Download queue display
         queue_frame = tk.Frame(self.root)
@@ -262,12 +481,123 @@ class YouTubeDownloaderApp:
             self.update_queue_display()
             self.status_label.config(text=f"Restored {len(self.download_queue)} items from previous session.")
 
+        # Start clipboard monitoring
+        if self.clipboard_monitoring:
+            self.start_clipboard_monitoring()
+
     def choose_folder(self):
         folder = filedialog.askdirectory()
         if folder:
             self.output_dir = folder
             self.folder_label.config(text=self.output_dir)
             self.save_config()
+
+    def toggle_clipboard_monitoring(self):
+        """Toggle clipboard monitoring on/off"""
+        self.clipboard_monitoring = self.clipboard_var.get()
+        if self.clipboard_monitoring:
+            self.start_clipboard_monitoring()
+            self.status_label.config(text="Clipboard monitoring enabled")
+        else:
+            self.status_label.config(text="Clipboard monitoring disabled")
+        self.save_config()
+
+    def start_clipboard_monitoring(self):
+        """Start monitoring clipboard for YouTube URLs"""
+        self.check_clipboard()
+
+    def check_clipboard(self):
+        """Check clipboard for YouTube URLs"""
+        if not self.clipboard_monitoring:
+            return
+
+        try:
+            current_clipboard = pyperclip.paste()
+            if current_clipboard != self.last_clipboard_content:
+                self.last_clipboard_content = current_clipboard
+                if self.is_youtube_url(current_clipboard):
+                    self.handle_clipboard_url(current_clipboard)
+        except Exception as e:
+            print(f"Clipboard monitoring error: {e}")
+
+        # Schedule next check
+        self.root.after(self.clipboard_check_interval, self.check_clipboard)
+
+    def is_youtube_url(self, url):
+        """Check if URL is a valid YouTube URL"""
+        if not url or not isinstance(url, str):
+            return False
+
+        youtube_patterns = [
+            r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+',
+            r'(?:https?://)?(?:www\.)?youtu\.be/[\w-]+',
+            r'(?:https?://)?(?:www\.)?youtube\.com/playlist\?list=[\w-]+',
+            r'(?:https?://)?(?:www\.)?youtube\.com/channel/[\w-]+',
+            r'(?:https?://)?(?:www\.)?youtube\.com/@[\w-]+',
+        ]
+
+        for pattern in youtube_patterns:
+            if re.match(pattern, url.strip()):
+                return True
+        return False
+
+    def handle_clipboard_url(self, url):
+        """Handle detected YouTube URL from clipboard"""
+        # Only auto-fill if URL field is empty or contains the same URL
+        current_url = self.url_entry.get().strip()
+        if not current_url or current_url == url.strip():
+            self.url_entry.delete(0, tk.END)
+            self.url_entry.insert(0, url.strip())
+
+            # Show notification
+            self.status_label.config(text="📋 YouTube URL detected and pasted from clipboard!")
+
+            # Optional: Auto-parse if no video is currently loaded
+            if not self.video_info:
+                # Ask user if they want to auto-parse
+                self.root.after(100, lambda: self.ask_auto_parse(url.strip()))
+
+    def ask_auto_parse(self, url):
+        """Ask user if they want to auto-parse the detected URL"""
+        result = messagebox.askyesno("Auto-Parse URL",
+                                   "YouTube URL detected in clipboard!\n\n"
+                                   f"URL: {url[:50]}{'...' if len(url) > 50 else ''}\n\n"
+                                   "Would you like to parse this video automatically?")
+        if result:
+            self.parse_video()
+
+    def update_concurrent_downloads(self):
+        """Update maximum concurrent downloads"""
+        try:
+            new_value = int(self.concurrent_var.get())
+            if 1 <= new_value <= 5:
+                self.max_concurrent_downloads = new_value
+                # Update thread pool
+                self.download_executor.shutdown(wait=False)
+                self.download_executor = ThreadPoolExecutor(max_workers=self.max_concurrent_downloads)
+                self.save_config()
+                self.status_label.config(text=f"Max concurrent downloads set to {new_value}")
+        except ValueError:
+            self.concurrent_var.set(str(self.max_concurrent_downloads))
+
+    def update_speed_limit(self, event=None):
+        """Update download speed limit"""
+        try:
+            speed_text = self.speed_limit_var.get().strip()
+            if speed_text == "":
+                self.download_speed_limit = None
+                self.status_label.config(text="Speed limit removed (unlimited)")
+            else:
+                speed_value = int(speed_text)
+                if speed_value > 0:
+                    self.download_speed_limit = speed_value
+                    self.status_label.config(text=f"Speed limit set to {speed_value} KB/s")
+                else:
+                    raise ValueError("Speed must be positive")
+            self.save_config()
+        except ValueError:
+            self.speed_limit_var.set("" if self.download_speed_limit is None else str(self.download_speed_limit))
+            messagebox.showwarning("Invalid Speed", "Please enter a valid positive number for speed limit (KB/s)")
 
     def choose_ffmpeg(self):
         folder = filedialog.askdirectory()
@@ -501,10 +831,17 @@ class YouTubeDownloaderApp:
         self.download_queue.append(queue_item)
         self.update_queue_display()
 
+        # Check if downloads are currently active and extend the session
+        if self.is_queue_processing:
+            self.extend_download_session(queue_item)
+
         # Clear current video info to allow adding more
         self.clear_current_video()
 
-        self.status_label.config(text=f"Added '{title}' to queue. Total items: {len(self.download_queue)}")
+        queue_status = f"Added '{title}' to queue. Total items: {len(self.download_queue)}"
+        if self.is_queue_processing:
+            queue_status += " (Download session extended)"
+        self.status_label.config(text=queue_status)
 
     def clear_current_video(self):
         """Clear current video information to allow parsing new video"""
@@ -530,7 +867,16 @@ class YouTubeDownloaderApp:
         self.queue_listbox.delete(0, tk.END)
 
         for i, item in enumerate(self.download_queue):
-            status_icon = "⏳" if item['status'] == 'Queued' else "📥" if item['status'] == 'Downloading' else "✅" if item['status'] == 'Completed' else "❌"
+            # Determine status icon
+            if item['status'] == 'Queued':
+                status_icon = "🔄" if 'resume_data' in item else "⏳"
+            elif item['status'] == 'Downloading':
+                status_icon = "📥"
+            elif item['status'] == 'Completed':
+                status_icon = "✅"
+            else:
+                status_icon = "❌"
+
             format_text = f"{item['download_type'].upper()}"
             if item['quality'] != 'best':
                 if item['download_type'] == 'mp3':
@@ -540,7 +886,10 @@ class YouTubeDownloaderApp:
             else:
                 format_text += " Best"
 
-            display_text = f"{status_icon} {item['title']} ({format_text})"
+            # Add resume indicator
+            resume_text = " (Resume)" if 'resume_data' in item else ""
+
+            display_text = f"{status_icon} {item['title']} ({format_text}){resume_text}"
             self.queue_listbox.insert(tk.END, display_text)
 
             # Highlight current download
@@ -624,6 +973,47 @@ class YouTubeDownloaderApp:
             self.queue_context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.queue_context_menu.grab_release()
+
+    def extend_download_session(self, new_queue_item):
+        """Extend current download session with newly added queue item"""
+        if not self.is_queue_processing:
+            return
+
+        # Mark that queue has been extended
+        self.queue_extended = True
+
+        # If we're doing concurrent downloads, submit the new item immediately
+        if self.max_concurrent_downloads > 1:
+            # Add to concurrent tracking
+            download_id = f"download_{len(self.concurrent_progress)}"
+            self.concurrent_progress[download_id] = 0
+
+            # Submit new download
+            new_queue_item['status'] = 'Downloading'
+            future = self.download_executor.submit(self.download_video_from_queue_concurrent, new_queue_item, download_id)
+            self.active_futures[future] = (new_queue_item, download_id)
+
+            # Update totals
+            self.total_concurrent_downloads += 1
+
+            # Update display
+            self.update_queue_display()
+            self.update_extended_session_status()
+
+        # For sequential downloads, the item will be picked up naturally when the current download finishes
+
+    def update_extended_session_status(self):
+        """Update status message for extended download session"""
+        if self.max_concurrent_downloads == 1:
+            remaining = len([item for item in self.download_queue if item['status'] == 'Queued'])
+            current_pos = self.current_download_index + 1
+            total = len(self.download_queue)
+            self.status_label.config(text=f"Downloading {current_pos}/{total} (Queue extended - {remaining} items added)")
+        else:
+            active_count = len([item for item in self.download_queue if item['status'] == 'Downloading'])
+            completed_count = len([item for item in self.download_queue if item['status'] == 'Completed'])
+            total = len(self.download_queue)
+            self.status_label.config(text=f"Concurrent downloads: {active_count} active, {completed_count}/{total} completed (Queue extended)")
 
     def download_selected_from_queue(self):
         """Download selected item from queue immediately"""
@@ -761,8 +1151,10 @@ class YouTubeDownloaderApp:
             self.resolution_label.config(text="Audio Quality:")
             self.resolution_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 5))
 
-            audio_qualities = ["best", "192", "128", "96", "64"]
-            self.resolution_var.set("192")
+            # Order from lowest to highest quality (bandwidth-friendly first)
+            audio_qualities = ["64", "96", "128", "192", "best"]
+            # Set default to lowest quality for bandwidth-friendly downloads
+            self.resolution_var.set("64")
 
             # Create grid layout for audio quality options (3 per row)
             current_row = 1  # Start from row 1 since label is in row 0
@@ -810,17 +1202,18 @@ class YouTubeDownloaderApp:
                             'filesize': filesize
                         })
 
-            # Sort by resolution (highest first)
-            video_formats.sort(key=lambda x: x['height'], reverse=True)
+            # Sort by resolution (lowest first for bandwidth-friendly display)
+            video_formats.sort(key=lambda x: x['height'], reverse=False)
 
             if video_formats:
-                # Set default to highest quality
+                # Set default to lowest quality for bandwidth-friendly downloads
                 self.resolution_var.set(str(video_formats[0]['height']))
 
-                # Create a list of all resolution options
-                all_resolutions = ["best"]  # Start with "Best Available"
+                # Create a list of all resolution options (lowest first, then "best")
+                all_resolutions = []
                 for fmt in video_formats:
                     all_resolutions.append(str(fmt['height']))
+                all_resolutions.append("best")  # Add "Best Available" at the end
 
                 # Create grid layout for video resolution options (3 per row)
                 current_row = 1  # Start from row 1 since label is in row 0
@@ -868,14 +1261,50 @@ class YouTubeDownloaderApp:
                 self.resolution_buttons.append(rb)
 
     def stop_download(self):
-        """Stop current download or queue processing"""
+        """Stop current download or queue processing and interrupt all active processes"""
         self.cancel_requested = True
+
+        # Set the global stop event to interrupt all downloads
+        self.download_stop_event.set()
+
+        # Set all individual stop events
+        for stop_event in self.stop_events:
+            stop_event.set()
+
+        # Cancel any running futures
+        for future in list(self.active_futures.keys()):
+            try:
+                future.cancel()
+            except Exception as e:
+                print(f"Error cancelling future: {e}")
+
+        # Shutdown and recreate the thread pool executor to force stop
+        if hasattr(self, 'download_executor'):
+            try:
+                self.download_executor.shutdown(wait=False)
+            except Exception as e:
+                print(f"Error shutting down executor: {e}")
+
+            # Recreate the executor
+            self.download_executor = ThreadPoolExecutor(max_workers=self.max_concurrent_downloads)
 
         if self.is_queue_processing:
             self.status_label.config(text="Stopping queue...")
             self.is_queue_processing = False
+            # Clear concurrent progress tracking
+            self.concurrent_progress = {}
+            self.completed_concurrent_downloads = 0
+            self.total_concurrent_downloads = 0
+            # Clear dynamic queue tracking
+            self.queue_extended = False
+            self.active_futures = {}
+            self.initial_queue_size = 0
         else:
             self.status_label.config(text="Stopping download...")
+
+        # Clear tracking lists
+        self.active_download_processes.clear()
+        self.stop_events.clear()
 
         # Reset progress indicators
         self.progress_var.set(0)
@@ -886,6 +1315,9 @@ class YouTubeDownloaderApp:
 
         # Reset button states
         self.reset_download_buttons()
+
+        # Clear the global stop event for next download
+        self.download_stop_event.clear()
 
     def reset_download_buttons(self):
         """Reset download button states"""
@@ -909,6 +1341,17 @@ class YouTubeDownloaderApp:
         self.current_download_index = 0
         self.cancel_requested = False
 
+        # Initialize dynamic queue tracking
+        self.initial_queue_size = len(self.download_queue)
+        self.queue_extended = False
+        self.active_futures = {}
+
+        # Reset progress tracking
+        self.progress_var.set(0)
+        self.speed_label.config(text="")
+        self.download_phase_label.config(text="")
+        self.elapsed_time_label.config(text="")
+
         # Update button states
         self.start_queue_button.config(state="disabled")
         self.start_single_button.config(state="disabled")
@@ -918,19 +1361,40 @@ class YouTubeDownloaderApp:
         threading.Thread(target=self.process_download_queue).start()
 
     def process_download_queue(self):
-        """Process all items in the download queue"""
+        """Process all items in the download queue with concurrent downloads"""
         total_items = len(self.download_queue)
 
-        for i, queue_item in enumerate(self.download_queue):
-            if self.cancel_requested:
-                break
+        if self.max_concurrent_downloads == 1:
+            # Sequential processing for single download
+            self.process_queue_sequential(total_items)
+        else:
+            # Concurrent processing for multiple downloads
+            self.process_queue_concurrent(total_items)
+
+    def process_queue_sequential(self, _):
+        """Process queue sequentially with dynamic queue extension support"""
+        i = 0
+        while i < len(self.download_queue) and not self.cancel_requested:
+            queue_item = self.download_queue[i]
+
+            # Skip already completed items
+            if queue_item['status'] == 'Completed':
+                i += 1
+                continue
 
             self.current_download_index = i
             queue_item['status'] = 'Downloading'
 
             # Update display in main thread
+            current_total = len(self.download_queue)
             self.root.after(0, self.update_queue_display)
-            self.root.after(0, lambda: self.status_label.config(text=f"Downloading {i+1}/{total_items}: {queue_item['title']}"))
+
+            if self.queue_extended:
+                self.root.after(0, lambda pos=i+1, total=current_total, item=queue_item:
+                              self.status_label.config(text=f"Downloading {pos}/{total}: {item['title']} (Queue extended)"))
+            else:
+                self.root.after(0, lambda pos=i+1, total=current_total, item=queue_item:
+                              self.status_label.config(text=f"Downloading {pos}/{total}: {item['title']}"))
 
             # Set up video info for this download
             self.video_info = queue_item['video_info']
@@ -940,39 +1404,318 @@ class YouTubeDownloaderApp:
             success = self.download_video_from_queue(queue_item)
 
             # Update status
+            current_total = len(self.download_queue)  # Refresh total in case queue was extended
             if success and not self.cancel_requested:
                 queue_item['status'] = 'Completed'
-                self.root.after(0, lambda: self.status_label.config(text=f"Completed {i+1}/{total_items}: {queue_item['title']}"))
+                self.root.after(0, lambda pos=i+1, total=current_total, item=queue_item:
+                              self.status_label.config(text=f"Completed {pos}/{total}: {item['title']}"))
             else:
                 queue_item['status'] = 'Failed'
-                self.root.after(0, lambda: self.status_label.config(text=f"Failed {i+1}/{total_items}: {queue_item['title']}"))
+                self.root.after(0, lambda pos=i+1, total=current_total, item=queue_item:
+                              self.status_label.config(text=f"Failed {pos}/{total}: {item['title']}"))
 
             # Update display
             self.root.after(0, self.update_queue_display)
 
             # Small delay between downloads
-            if not self.cancel_requested and i < total_items - 1:
+            if not self.cancel_requested and i < len(self.download_queue) - 1:
                 time.sleep(1)
 
+            i += 1
+
         # Queue processing complete
+        self.finish_queue_processing(len(self.download_queue))
+
+    def process_queue_concurrent(self, total_items):
+        """Process queue with concurrent downloads"""
+        # Initialize concurrent progress tracking
+        self.concurrent_progress = {}
+        self.completed_concurrent_downloads = 0
+
+        # Submit initial downloads to thread pool
+        self.active_futures = {}
+        download_count = 0
+
+        for queue_item in self.download_queue:
+            if self.cancel_requested:
+                break
+
+            if queue_item['status'] != 'Completed':
+                queue_item['status'] = 'Downloading'
+                download_id = f"download_{download_count}"
+                self.concurrent_progress[download_id] = 0
+                future = self.download_executor.submit(self.download_video_from_queue_concurrent, queue_item, download_id)
+                self.active_futures[future] = (queue_item, download_id)
+                download_count += 1
+
+        self.total_concurrent_downloads = download_count
+
+        # Update display to show all items as downloading
+        self.root.after(0, self.update_queue_display)
+        if self.total_concurrent_downloads == 1:
+            self.root.after(0, lambda: self.status_label.config(text="Starting download..."))
+        else:
+            self.root.after(0, lambda: self.status_label.config(text=f"Starting {self.total_concurrent_downloads} concurrent downloads..."))
+
+        # Start progress monitoring
+        self.monitor_concurrent_progress()
+
+        # Process completed downloads with dynamic queue support
+        self.process_concurrent_downloads_with_extension()
+
+        # Queue processing complete
+        self.finish_queue_processing(total_items)
+
+    def process_concurrent_downloads_with_extension(self):
+        """Process concurrent downloads with support for dynamic queue extension"""
+        completed = 0
+
+        while self.active_futures and not self.cancel_requested:
+            # Wait for any download to complete
+            for future in as_completed(self.active_futures.copy()):
+                if self.cancel_requested:
+                    break
+
+                queue_item, _ = self.active_futures.pop(future)
+
+                try:
+                    success = future.result()
+                    if success:
+                        queue_item['status'] = 'Completed'
+                        completed += 1
+                    else:
+                        queue_item['status'] = 'Failed'
+                        completed += 1  # Count failed as completed for progress tracking
+                except Exception as e:
+                    print(f"Download error for {queue_item['title']}: {e}")
+                    queue_item['status'] = 'Failed'
+                    completed += 1  # Count failed as completed for progress tracking
+
+                # Update completed count
+                self.completed_concurrent_downloads = completed
+
+                # Update display
+                self.root.after(0, self.update_queue_display)
+
+                # Update status with current progress
+                if self.queue_extended:
+                    self.root.after(0, self.update_extended_session_status)
+                else:
+                    self.root.after(0, lambda c=completed, t=self.total_concurrent_downloads:
+                                  self.status_label.config(text=f"Completed {c}/{t} concurrent downloads"))
+
+                # Break from inner loop to check for new futures
+                break
+
+    def monitor_concurrent_progress(self):
+        """Monitor and update progress for concurrent downloads with dynamic queue support"""
+        if not self.is_queue_processing:
+            return
+
+        # Calculate average progress across all active downloads
+        if self.concurrent_progress:
+            total_progress = sum(self.concurrent_progress.values())
+            avg_progress = total_progress / len(self.concurrent_progress)
+
+            # Factor in completed downloads - use current queue size for dynamic calculation
+            current_total = len(self.download_queue)
+            completed_count = len([item for item in self.download_queue if item['status'] == 'Completed'])
+
+            if current_total > 0:
+                completion_factor = completed_count / current_total
+                overall_progress = (completion_factor * 100) + ((1 - completion_factor) * avg_progress)
+                self.progress_var.set(overall_progress)
+
+        # Schedule next update
+        self.root.after(500, self.monitor_concurrent_progress)
+
+    def finish_queue_processing(self, _):
+        """Finish queue processing and update UI"""
         self.is_queue_processing = False
         completed_count = sum(1 for item in self.download_queue if item['status'] == 'Completed')
+        failed_count = sum(1 for item in self.download_queue if item['status'] == 'Failed')
+        actual_total = len(self.download_queue)
 
-        self.root.after(0, lambda: self.status_label.config(text=f"Queue complete! {completed_count}/{total_items} downloads successful."))
-        self.root.after(0, self.reset_download_buttons)
+        # Create completion message
+        if self.queue_extended:
+            message = f"Extended queue complete! {completed_count}/{actual_total} downloads successful"
+            if failed_count > 0:
+                message += f" ({failed_count} failed)"
+            message += f". Started with {self.initial_queue_size}, processed {actual_total} total."
+        else:
+            message = f"Queue complete! {completed_count}/{actual_total} downloads successful"
+            if failed_count > 0:
+                message += f" ({failed_count} failed)"
+            message += "."
 
-    def download_video_from_queue(self, queue_item):
-        """Download a single video from queue item"""
+        # Reset dynamic queue tracking
+        self.queue_extended = False
+        self.active_futures = {}
+        self.initial_queue_size = 0
+
+        try:
+            self.root.after(0, lambda: self.status_label.config(text=message))
+            self.root.after(0, self.reset_download_buttons)
+        except RuntimeError:
+            # Handle case where main thread is not in main loop (app closing)
+            pass
+
+    def download_video_from_queue_concurrent(self, queue_item, download_id):
+        """Download a single video from queue item for concurrent processing with resume support"""
         try:
             url = queue_item['url']
             download_type = queue_item['download_type']
             quality = queue_item['quality']
+
+            # Check if this is a resume operation
+            is_resume = 'resume_data' in queue_item
+            resume_data = queue_item.get('resume_data', {})
+
+            # Parse video info if not available
+            if not queue_item.get('video_info'):
+                success = self.parse_queue_item_info(queue_item)
+                if not success:
+                    return False
+
+            # Build format selector
+            is_mp3 = download_type == "mp3"
+            if is_mp3:
+                format_selector = "bestaudio/best"
+            else:
+                if quality == "best":
+                    format_selector = "bestvideo+bestaudio/best"
+                else:
+                    height = quality
+                    format_selector = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+
+            # Create progress hook for this specific download
+            def concurrent_progress_hook(d):
+                # Check for cancellation first
+                if self.cancel_requested or self.download_stop_event.is_set() or stop_event.is_set():
+                    raise KeyboardInterrupt("Download cancelled by user")
+
+                if d['status'] == 'downloading':
+                    if 'total_bytes' in d and d['total_bytes']:
+                        progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
+                        self.concurrent_progress[download_id] = progress
+                    elif 'total_bytes_estimate' in d and d['total_bytes_estimate']:
+                        progress = (d['downloaded_bytes'] / d['total_bytes_estimate']) * 100
+                        self.concurrent_progress[download_id] = progress
+                elif d['status'] == 'finished':
+                    self.concurrent_progress[download_id] = 100
+
+            # Create unique filename for concurrent download
+            safe_title = "".join(c for c in queue_item['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_title = safe_title[:50]  # Limit length
+
+            # Setup resume-capable download options for concurrent downloads
+            if is_resume:
+                # Use existing partial file for resume
+                partial_file = resume_data.get('partial_file')
+                output_template = partial_file.replace('.part', '.%(ext)s') if partial_file else os.path.join(self.output_dir, f"{safe_title}.%(ext)s")
+            else:
+                output_template = os.path.join(self.output_dir, f"{safe_title}.%(ext)s")
+                # Create resume data entry
+                self.create_resume_entry(url, queue_item, output_template)
+
+            ydl_opts = {
+                "format": format_selector,
+                "ffmpeg_location": self.ffmpeg_path,
+                "outtmpl": output_template,
+                "postprocessors": [],
+                "progress_hooks": [concurrent_progress_hook],
+                "continuedl": True,  # Enable resume functionality
+                "part": True,  # Create .part files for resuming
+                "mtime": True,  # Preserve modification time
+                "quiet": True,  # Reduce output for concurrent downloads
+                "no_warnings": True
+            }
+
+            # Add speed limit if configured
+            if self.download_speed_limit:
+                ydl_opts["ratelimit"] = self.download_speed_limit * 1024  # Convert KB/s to bytes/s
+
+            if is_mp3:
+                audio_quality = quality if quality != "best" else "192"
+                ydl_opts["postprocessors"].append({
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": audio_quality,
+                })
+            else:
+                ydl_opts["postprocessors"].append({
+                    "key": "FFmpegVideoConvertor",
+                    "preferedformat": "mp4"
+                })
+
+            # Create stop event for this download
+            stop_event = threading.Event()
+            self.stop_events.append(stop_event)
+
+            # Download the video with interruptible downloader
+            ydl = InterruptibleYoutubeDL(stop_event, ydl_opts)
+            self.active_download_processes.append(ydl)
+
+            try:
+                # Check if already cancelled before starting
+                if self.cancel_requested or self.download_stop_event.is_set():
+                    return False
+
+                ydl.download([url])
+
+                # Remove from resume data on successful completion
+                if url in self.resume_data:
+                    del self.resume_data[url]
+                    self.save_resume_data()
+
+                # Mark as completed
+                self.concurrent_progress[download_id] = 100
+                return True
+            finally:
+                # Remove from active processes
+                if ydl in self.active_download_processes:
+                    self.active_download_processes.remove(ydl)
+                if stop_event in self.stop_events:
+                    self.stop_events.remove(stop_event)
+
+        except KeyboardInterrupt:
+            print(f"Download interrupted by user: {queue_item['title']}")
+            # Save resume data on interruption (partial download may be available)
+            if url in self.resume_data:
+                self.save_resume_data()
+            # Mark as completed even if interrupted
+            self.concurrent_progress[download_id] = 100
+            return False
+        except Exception as e:
+            print(f"Error downloading {queue_item['title']}: {e}")
+
+            # Save resume data on error (partial download may be available)
+            if url in self.resume_data:
+                self.save_resume_data()
+
+            # Mark as completed even if failed
+            self.concurrent_progress[download_id] = 100
+            return False
+
+    def download_video_from_queue(self, queue_item):
+        """Download a single video from queue item with resume support"""
+        try:
+            url = queue_item['url']
+            download_type = queue_item['download_type']
+            quality = queue_item['quality']
+
+            # Check if this is a resume operation
+            is_resume = 'resume_data' in queue_item
+            resume_data = queue_item.get('resume_data', {})
 
             # Reset progress bar and indicators
             self.root.after(0, lambda: self.progress_var.set(0))
             self.root.after(0, lambda: self.speed_label.config(text=""))
             self.root.after(0, lambda: self.download_phase_label.config(text=""))
             self.root.after(0, lambda: self.elapsed_time_label.config(text=""))
+
+            if is_resume:
+                self.root.after(0, lambda: self.status_label.config(text=f"Resuming download: {queue_item['title']}"))
 
             self.download_start_time = time.time()
             self.current_download_phase = ""
@@ -988,13 +1731,34 @@ class YouTubeDownloaderApp:
                     height = quality
                     format_selector = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
 
+            # Create unique filename for this download
+            safe_title = "".join(c for c in queue_item['title'] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_title = safe_title[:50]  # Limit length
+
+            # Setup resume-capable download options
+            if is_resume:
+                # Use existing partial file for resume
+                partial_file = resume_data.get('partial_file')
+                output_template = partial_file.replace('.part', '.%(ext)s') if partial_file else os.path.join(self.output_dir, f"{safe_title}.%(ext)s")
+            else:
+                output_template = os.path.join(self.output_dir, f"{safe_title}.%(ext)s")
+                # Create resume data entry
+                self.create_resume_entry(url, queue_item, output_template)
+
             ydl_opts = {
                 "format": format_selector,
                 "ffmpeg_location": self.ffmpeg_path,
-                "outtmpl": os.path.join(self.output_dir, "%(title)s.%(ext)s"),
+                "outtmpl": output_template,
                 "postprocessors": [],
-                "progress_hooks": [self.progress_hook]
+                "progress_hooks": [self.progress_hook_with_resume],
+                "continuedl": True,  # Enable resume functionality
+                "part": True,  # Create .part files for resuming
+                "mtime": True,  # Preserve modification time
             }
+
+            # Add speed limit if configured
+            if self.download_speed_limit:
+                ydl_opts["ratelimit"] = self.download_speed_limit * 1024  # Convert KB/s to bytes/s
 
             if is_mp3:
                 audio_quality = quality if quality != "best" else "192"
@@ -1009,16 +1773,106 @@ class YouTubeDownloaderApp:
                     "preferedformat": "mp4"
                 })
 
-            # Download the video
-            with YoutubeDL(ydl_opts) as ydl:
+            # Create stop event for this download
+            stop_event = threading.Event()
+            self.stop_events.append(stop_event)
+
+            # Download the video with interruptible downloader
+            ydl = InterruptibleYoutubeDL(stop_event, ydl_opts)
+            self.active_download_processes.append(ydl)
+
+            try:
+                # Check if already cancelled before starting
+                if self.cancel_requested or self.download_stop_event.is_set():
+                    return False
+
                 ydl.download([url])
 
-            return True
+                # Remove from resume data on successful completion
+                if url in self.resume_data:
+                    del self.resume_data[url]
+                    self.save_resume_data()
 
+                return True
+            finally:
+                # Remove from active processes
+                if ydl in self.active_download_processes:
+                    self.active_download_processes.remove(ydl)
+                if stop_event in self.stop_events:
+                    self.stop_events.remove(stop_event)
+
+        except KeyboardInterrupt:
+            print(f"Download interrupted by user: {queue_item['title']}")
+            # Save resume data on interruption (partial download may be available)
+            if url in self.resume_data:
+                self.save_resume_data()
+            return False
         except Exception as e:
             error_msg = f"Error downloading {queue_item['title']}: {e}"
             print(error_msg)
+
+            # Save resume data on error (partial download may be available)
+            if url in self.resume_data:
+                self.save_resume_data()
+
             return False
+
+    def create_resume_entry(self, url, queue_item, output_template):
+        """Create resume data entry for a new download"""
+        # Generate partial file path
+        base_path = output_template.replace('.%(ext)s', '')
+        partial_file = f"{base_path}.part"
+
+        self.resume_data[url] = {
+            'title': queue_item['title'],
+            'download_type': queue_item['download_type'],
+            'quality': queue_item['quality'],
+            'video_info': queue_item.get('video_info', {}),
+            'available_formats': queue_item.get('available_formats', []),
+            'partial_file': partial_file,
+            'output_template': output_template,
+            'created_time': time.time(),
+            'last_progress': 0
+        }
+        self.save_resume_data()
+
+    def progress_hook_with_resume(self, d):
+        """Progress hook that also handles resume data updates and checks for cancellation"""
+        # Check for cancellation first
+        if self.cancel_requested or self.download_stop_event.is_set():
+            raise KeyboardInterrupt("Download cancelled by user")
+
+        # Call the original progress hook
+        self.progress_hook(d)
+
+        # Update resume data
+        if d['status'] == 'downloading':
+            url = d.get('info_dict', {}).get('webpage_url', '')
+            if url in self.resume_data:
+                if 'total_bytes' in d and d['total_bytes']:
+                    progress = (d['downloaded_bytes'] / d['total_bytes']) * 100
+                    self.resume_data[url]['last_progress'] = progress
+                elif 'total_bytes_estimate' in d and d['total_bytes_estimate']:
+                    progress = (d['downloaded_bytes'] / d['total_bytes_estimate']) * 100
+                    self.resume_data[url]['last_progress'] = progress
+
+                # Update partial file path if it changed
+                if 'filename' in d:
+                    filename = d['filename']
+                    if filename.endswith('.part'):
+                        self.resume_data[url]['partial_file'] = filename
+
+                # Save resume data periodically (every 5% progress)
+                current_progress = self.resume_data[url]['last_progress']
+                if current_progress % 5 < 1:  # Roughly every 5%
+                    self.save_resume_data()
+
+        elif d['status'] == 'finished':
+            # Download completed, remove from resume data
+            url = d.get('info_dict', {}).get('webpage_url', '')
+            if url in self.resume_data:
+                del self.resume_data[url]
+                self.save_resume_data()
 
     def start_download(self):
         """Start downloading current single video"""
@@ -1083,6 +1937,10 @@ class YouTubeDownloaderApp:
 
     def progress_hook(self, d):
         """Progress hook for yt-dlp to update progress bar, speed, and elapsed time"""
+        # Check for cancellation first
+        if self.cancel_requested or self.download_stop_event.is_set():
+            raise KeyboardInterrupt("Download cancelled by user")
+
         if d['status'] == 'downloading':
             # Detect and update download phase
             current_phase = self.detect_download_phase(d)
@@ -1152,6 +2010,10 @@ class YouTubeDownloaderApp:
             "progress_hooks": [self.progress_hook]
         }
 
+        # Add speed limit if configured
+        if self.download_speed_limit:
+            ydl_opts["ratelimit"] = self.download_speed_limit * 1024  # Convert KB/s to bytes/s
+
         if is_mp3:
             # Use selected audio quality
             audio_quality = selected_quality if selected_quality != "best" else "192"
@@ -1171,21 +2033,47 @@ class YouTubeDownloaderApp:
             quality_text = f" ({selected_quality}{'p' if not is_mp3 and selected_quality != 'best' else ' kbps' if is_mp3 and selected_quality != 'best' else ''})"
             self.status_label.config(text=f"Downloading: {title}{quality_text}")
 
-            with YoutubeDL(ydl_opts) as ydl:
+            # Create stop event for this download
+            stop_event = threading.Event()
+            self.stop_events.append(stop_event)
+
+            ydl = InterruptibleYoutubeDL(stop_event, ydl_opts)
+            self.active_download_processes.append(ydl)
+
+            try:
+                # Check if already cancelled before starting
+                if self.cancel_requested or self.download_stop_event.is_set():
+                    return
+
                 ydl.download([url])
 
-            # Ensure progress bar shows 100% when complete and show final elapsed time
-            self.progress_var.set(100)
+                # Ensure progress bar shows 100% when complete and show final elapsed time
+                if not self.cancel_requested and not self.download_stop_event.is_set():
+                    self.progress_var.set(100)
+                    self.speed_label.config(text="")
+                    self.download_phase_label.config(text="✅ Complete")
+
+                    # Show final elapsed time
+                    if self.download_start_time:
+                        total_elapsed = time.time() - self.download_start_time
+                        final_elapsed_text = f"Completed in {self.format_elapsed_time(total_elapsed).replace('Elapsed: ', '')}"
+                        self.elapsed_time_label.config(text=final_elapsed_text)
+
+                    self.status_label.config(text="Download complete.")
+            finally:
+                # Remove from active processes
+                if ydl in self.active_download_processes:
+                    self.active_download_processes.remove(ydl)
+                if stop_event in self.stop_events:
+                    self.stop_events.remove(stop_event)
+
+        except KeyboardInterrupt:
+            self.status_label.config(text="Download cancelled by user.")
+            # Reset progress bar, speed display, elapsed time, and download phase on cancellation
+            self.progress_var.set(0)
             self.speed_label.config(text="")
-            self.download_phase_label.config(text="✅ Complete")
-
-            # Show final elapsed time
-            if self.download_start_time:
-                total_elapsed = time.time() - self.download_start_time
-                final_elapsed_text = f"Completed in {self.format_elapsed_time(total_elapsed).replace('Elapsed: ', '')}"
-                self.elapsed_time_label.config(text=final_elapsed_text)
-
-            self.status_label.config(text="Download complete.")
+            self.elapsed_time_label.config(text="")
+            self.download_phase_label.config(text="")
         except Exception as e:
             error_msg = f"Error downloading video: {e}"
             print(error_msg)
