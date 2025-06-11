@@ -219,7 +219,11 @@ def create_inno_script():
 [Setup]
 AppName=YouTube Downloader
 AppVersion=1.0
-AppPublisher=YouTube Downloader
+AppPublisher=YouTube Downloader Team
+AppPublisherURL=https://github.com/rand-hawk/youtube-downloader
+AppSupportURL=https://github.com/rand-hawk/youtube-downloader/issues
+AppUpdatesURL=https://github.com/rand-hawk/youtube-downloader/releases
+AppId={{{{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}}}}
 DefaultDirName=C:\\YouTube Downloader
 DefaultGroupName=YouTube Downloader
 OutputDir=installer
@@ -229,6 +233,12 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+UninstallDisplayName=YouTube Downloader
+UninstallDisplayIcon={{app}}\\youtube-downloader.ico
+VersionInfoVersion=1.0.0.0
+VersionInfoCompany=YouTube Downloader Team
+VersionInfoDescription=Professional YouTube Video Downloader
+VersionInfoCopyright=Copyright (C) 2025 YouTube Downloader Team
 
 [Tasks]
 Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; GroupDescription: "{{cm:AdditionalIcons}}"; Flags: unchecked
@@ -249,9 +259,7 @@ Source: "{FFMPEG_DIR}\\ffprobe.exe"; DestDir: "{{app}}\\ffmpeg"; Flags: ignoreve
 Name: "{{group}}\\YouTube Downloader"; Filename: "{{app}}\\{EXE_NAME}.exe"; WorkingDir: "{{app}}"; IconFilename: "{{app}}\\{ICON_FILE}"
 Name: "{{commondesktop}}\\YouTube Downloader"; Filename: "{{app}}\\{EXE_NAME}.exe"; WorkingDir: "{{app}}"; IconFilename: "{{app}}\\{ICON_FILE}"; Tasks: desktopicon
 
-[Registry]
-Root: HKLM; Subkey: "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\YouTubeDownloader"; ValueType: string; ValueName: "DisplayName"; ValueData: "YouTube Downloader"
-Root: HKLM; Subkey: "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\YouTubeDownloader"; ValueType: string; ValueName: "UninstallString"; ValueData: "{{uninstallexe}}"
+
 
 [Run]
 Filename: "{{app}}\\{EXE_NAME}.exe"; Description: "{{cm:LaunchProgram,YouTube Downloader}}"; Flags: nowait postinstall skipifsilent
