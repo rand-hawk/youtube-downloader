@@ -46,7 +46,7 @@ youtube-download/
 ## Installation
 
 ### Option 1: Use the Installer (Recommended)
-- Run `installer/youtube-downloader-installer.exe`
+- Download and Run `youtube-downloader-installer.exe` from releases
 - Follow the installation wizard
 - Default installation: `C:\YouTube Downloader`
 
