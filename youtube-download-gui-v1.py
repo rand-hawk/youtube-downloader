@@ -363,9 +363,10 @@ class YouTubeDownloaderApp:
         folder_frame = tk.Frame(self.root)
         folder_frame.pack(pady=5, fill="x", padx=10)
         ttk.Label(folder_frame, text="Save to:").pack(side="left")
-        self.folder_label = ttk.Label(folder_frame, text=self.output_dir, width=50)
+        self.folder_label = ttk.Label(folder_frame, text=self.output_dir, width=45)
         self.folder_label.pack(side="left", padx=5)
-        ttk.Button(folder_frame, text="Choose Folder", command=self.choose_folder).pack(side="left")
+        ttk.Button(folder_frame, text="Choose Folder", command=self.choose_folder).pack(side="left", padx=2)
+        ttk.Button(folder_frame, text="Open Folder", command=self.open_download_folder).pack(side="left")
 
         # Performance and clipboard settings
         settings_frame = tk.Frame(self.root)
@@ -506,6 +507,19 @@ class YouTubeDownloaderApp:
             self.output_dir = folder
             self.folder_label.config(text=self.output_dir)
             self.save_config()
+
+    def open_download_folder(self):
+        """Open the download folder in Windows Explorer"""
+        try:
+            if os.path.exists(self.output_dir):
+                # Use Windows Explorer to open the folder
+                os.startfile(self.output_dir)
+            else:
+                # Create the folder if it doesn't exist and then open it
+                os.makedirs(self.output_dir, exist_ok=True)
+                os.startfile(self.output_dir)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open folder: {str(e)}")
 
     def toggle_clipboard_monitoring(self):
         """Toggle clipboard monitoring on/off"""

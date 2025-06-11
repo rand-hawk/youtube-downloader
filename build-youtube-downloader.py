@@ -120,11 +120,13 @@ a = Analysis(
         'urllib3.response',
         'urllib3.util',
         'certifi',
-        # PIL and pyperclip are now optional - don't force include them
-        # 'PIL',
-        # 'PIL.Image',
-        # 'PIL.ImageTk',
-        # 'pyperclip',
+        # Include PIL for thumbnail support
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageTk',
+        'PIL.ImageFilter',
+        # pyperclip for clipboard monitoring
+        'pyperclip',
 
         # Concurrent processing
         'concurrent.futures',
