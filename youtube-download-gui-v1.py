@@ -69,6 +69,7 @@ class YouTubeDownloaderApp:
         # Clipboard monitoring
         self.clipboard_monitoring = True
         self.last_clipboard_content = ""
+        self.last_parsed_url = ""  # Track the last URL that was parsed
         self.clipboard_check_interval = 1000  # milliseconds
 
         # Concurrent downloads
@@ -576,17 +577,19 @@ class YouTubeDownloaderApp:
         """Handle detected YouTube URL from clipboard"""
         # Only auto-fill if URL field is empty or contains the same URL
         current_url = self.url_entry.get().strip()
-        if not current_url or current_url == url.strip():
+        url_stripped = url.strip()
+
+        if not current_url or current_url == url_stripped:
             self.url_entry.delete(0, tk.END)
-            self.url_entry.insert(0, url.strip())
+            self.url_entry.insert(0, url_stripped)
 
             # Show notification
             self.status_label.config(text="📋 YouTube URL detected and pasted from clipboard!")
 
-            # Optional: Auto-parse if no video is currently loaded
-            if not self.video_info:
+            # Optional: Auto-parse if no video is currently loaded AND this URL hasn't been parsed yet
+            if not self.video_info and url_stripped != self.last_parsed_url:
                 # Ask user if they want to auto-parse
-                self.root.after(100, lambda: self.ask_auto_parse(url.strip()))
+                self.root.after(100, lambda: self.ask_auto_parse(url_stripped))
 
     def ask_auto_parse(self, url):
         """Ask user if they want to auto-parse the detected URL"""
@@ -809,6 +812,9 @@ class YouTubeDownloaderApp:
     def _update_video_info(self):
         """Update GUI with video information"""
         if self.video_info:
+            # Track the URL that was successfully parsed
+            self.last_parsed_url = self.url_entry.get().strip()
+
             title = self.video_info.get('title', 'Unknown Title')
             duration = self.video_info.get('duration', 0)
             duration_str = self.format_duration(duration)
@@ -878,6 +884,7 @@ class YouTubeDownloaderApp:
         self.url_entry.delete(0, tk.END)
         self.video_info = None
         self.available_formats = []
+        self.last_parsed_url = ""  # Reset the last parsed URL
         self.video_title_label.config(text="")
         self.thumbnail_label.config(text="", image="")
         self.thumbnail_image = None
