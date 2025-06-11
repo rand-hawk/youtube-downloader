@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import threading
 import tkinter as tk
@@ -6,13 +7,26 @@ from tkinter import ttk, messagebox, filedialog
 from yt_dlp import YoutubeDL
 import time
 import requests
-from PIL import Image, ImageTk
 from io import BytesIO
 import re
-import pyperclip
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import signal
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Optional imports
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("PIL not available - thumbnail display disabled")
+
+try:
+    import pyperclip
+    PYPERCLIP_AVAILABLE = True
+except ImportError:
+    PYPERCLIP_AVAILABLE = False
+    print("pyperclip not available - clipboard monitoring disabled")
 
 CONFIG_FILE = "config.json"
 ICON_FILE = "youtube-downloader-icon.png"
@@ -93,7 +107,19 @@ class YouTubeDownloaderApp:
 
     def load_config(self):
         default_output = os.path.abspath("downloaded_media")
-        default_ffmpeg = "c:/ffmpeg/bin"
+
+        # Detect if running as PyInstaller executable and find bundled FFmpeg
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable
+            application_path = os.path.dirname(sys.executable)
+            bundled_ffmpeg = os.path.join(application_path, "ffmpeg")
+            if os.path.exists(os.path.join(bundled_ffmpeg, "ffmpeg.exe")):
+                default_ffmpeg = bundled_ffmpeg
+            else:
+                default_ffmpeg = "c:/ffmpeg/bin"
+        else:
+            # Running as script
+            default_ffmpeg = "c:/ffmpeg/bin"
 
         config = {}
         if os.path.exists(CONFIG_FILE):
@@ -107,12 +133,9 @@ class YouTubeDownloaderApp:
         if not os.path.isdir(output_dir):
             output_dir = default_output
 
-        ffmpeg_path = config.get("ffmpeg_path", default_ffmpeg)
-        if not os.path.isdir(ffmpeg_path):
-            ffmpeg_path = default_ffmpeg
-
+        # FFmpeg path is always auto-detected, not user-configurable
         self.output_dir = output_dir
-        self.ffmpeg_path = ffmpeg_path
+        self.ffmpeg_path = default_ffmpeg
 
         # Load performance settings
         self.clipboard_monitoring = config.get("clipboard_monitoring", True)
@@ -265,7 +288,6 @@ class YouTubeDownloaderApp:
     def save_config(self):
         config = {
             "output_dir": self.output_dir,
-            "ffmpeg_path": self.ffmpeg_path,
             "clipboard_monitoring": self.clipboard_monitoring,
             "max_concurrent_downloads": self.max_concurrent_downloads,
             "download_speed_limit": self.download_speed_limit,
@@ -337,20 +359,13 @@ class YouTubeDownloaderApp:
         self.resolution_var = tk.StringVar(value="best")
         self.resolution_buttons = []
 
-        # Folder and FFmpeg settings
+        # Folder settings
         folder_frame = tk.Frame(self.root)
         folder_frame.pack(pady=5, fill="x", padx=10)
         ttk.Label(folder_frame, text="Save to:").pack(side="left")
         self.folder_label = ttk.Label(folder_frame, text=self.output_dir, width=50)
         self.folder_label.pack(side="left", padx=5)
         ttk.Button(folder_frame, text="Choose Folder", command=self.choose_folder).pack(side="left")
-
-        ffmpeg_frame = tk.Frame(self.root)
-        ffmpeg_frame.pack(pady=5, fill="x", padx=10)
-        ttk.Label(ffmpeg_frame, text="FFmpeg path:").pack(side="left")
-        self.ffmpeg_label = ttk.Label(ffmpeg_frame, text=self.ffmpeg_path, width=50)
-        self.ffmpeg_label.pack(side="left", padx=5)
-        ttk.Button(ffmpeg_frame, text="Choose FFmpeg", command=self.choose_ffmpeg).pack(side="left")
 
         # Performance and clipboard settings
         settings_frame = tk.Frame(self.root)
@@ -508,7 +523,9 @@ class YouTubeDownloaderApp:
 
     def check_clipboard(self):
         """Check clipboard for YouTube URLs"""
-        if not self.clipboard_monitoring:
+        if not self.clipboard_monitoring or not PYPERCLIP_AVAILABLE:
+            # Schedule next check even if disabled
+            self.root.after(self.clipboard_check_interval, self.check_clipboard)
             return
 
         try:
@@ -599,12 +616,7 @@ class YouTubeDownloaderApp:
             self.speed_limit_var.set("" if self.download_speed_limit is None else str(self.download_speed_limit))
             messagebox.showwarning("Invalid Speed", "Please enter a valid positive number for speed limit (KB/s)")
 
-    def choose_ffmpeg(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.ffmpeg_path = folder
-            self.ffmpeg_label.config(text=self.ffmpeg_path)
-            self.save_config()
+
 
     def parse_video(self):
         """Parse the video URL and extract available formats"""
@@ -762,6 +774,10 @@ class YouTubeDownloaderApp:
 
     def load_thumbnail(self, thumbnail_url):
         """Load and display video thumbnail"""
+        if not PIL_AVAILABLE:
+            self.thumbnail_label.config(text="Thumbnail\n(PIL not available)", image="")
+            return
+
         try:
             response = requests.get(thumbnail_url, timeout=10)
             if response.status_code == 200:

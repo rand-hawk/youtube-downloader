@@ -1,0 +1,19 @@
+# YouTube Downloader Requirements
+# Core dependencies
+yt-dlp>=2023.12.30
+Pillow>=10.0.0
+requests>=2.31.0
+pyperclip>=1.8.2
+
+# Optional but recommended for better compatibility
+certifi>=2023.7.22
+charset-normalizer>=3.3.0
+idna>=3.4
+urllib3>=2.0.0
+websockets>=11.0.0
+brotli>=1.1.0
+mutagen>=1.47.0
+pycryptodomex>=3.19.0
+
+# Build dependencies (for creating executable)
+pyinstaller>=6.0.0
