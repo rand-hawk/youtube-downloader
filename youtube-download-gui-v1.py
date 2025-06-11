@@ -29,6 +29,12 @@ class YouTubeDownloaderApp:
         self.download_start_time = None
         self.thumbnail_image = None
         self.current_download_phase = ""
+
+        # Download queue system
+        self.download_queue = []
+        self.current_download_index = 0
+        self.is_queue_processing = False
+
         self.load_config()
 
         self.setup_widgets()
@@ -56,12 +62,37 @@ class YouTubeDownloaderApp:
         self.output_dir = output_dir
         self.ffmpeg_path = ffmpeg_path
 
+        # Load saved queue
+        saved_queue = config.get("download_queue", [])
+        for item in saved_queue:
+            if item['status'] != 'Completed':  # Only restore non-completed items
+                queue_item = {
+                    'url': item['url'],
+                    'title': item['title'],
+                    'download_type': item['download_type'],
+                    'quality': item['quality'],
+                    'video_info': {},  # Will be populated when needed
+                    'available_formats': [],  # Will be populated when needed
+                    'status': 'Queued'
+                }
+                self.download_queue.append(queue_item)
+
         os.makedirs(self.output_dir, exist_ok=True)
 
     def save_config(self):
         config = {
             "output_dir": self.output_dir,
-            "ffmpeg_path": self.ffmpeg_path
+            "ffmpeg_path": self.ffmpeg_path,
+            "download_queue": [
+                {
+                    'url': item['url'],
+                    'title': item['title'],
+                    'download_type': item['download_type'],
+                    'quality': item['quality'],
+                    'status': 'Queued' if item['status'] in ['Downloading', 'Failed'] else item['status']
+                }
+                for item in self.download_queue
+            ]
         }
         with open(CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=4)
@@ -135,11 +166,66 @@ class YouTubeDownloaderApp:
         self.ffmpeg_label.pack(side="left", padx=5)
         ttk.Button(ffmpeg_frame, text="Choose FFmpeg", command=self.choose_ffmpeg).pack(side="left")
 
+        # Queue management buttons
+        queue_button_frame = tk.Frame(self.root)
+        queue_button_frame.pack(pady=5)
+        self.add_to_queue_button = ttk.Button(queue_button_frame, text="Add to Queue", command=self.add_to_queue, state="disabled")
+        self.add_to_queue_button.pack(side="left", padx=5)
+        self.clear_queue_button = ttk.Button(queue_button_frame, text="Clear Queue", command=self.clear_queue)
+        self.clear_queue_button.pack(side="left", padx=5)
+
+        # Download queue display
+        queue_frame = tk.Frame(self.root)
+        queue_frame.pack(pady=5, fill="both", expand=True, padx=10)
+
+        ttk.Label(queue_frame, text="Download Queue:").pack(anchor="w")
+
+        # Create queue listbox with scrollbar
+        queue_list_frame = tk.Frame(queue_frame)
+        queue_list_frame.pack(fill="both", expand=True)
+
+        self.queue_listbox = tk.Listbox(queue_list_frame, height=6)
+        queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical", command=self.queue_listbox.yview)
+        self.queue_listbox.configure(yscrollcommand=queue_scrollbar.set)
+
+        # Add context menu for queue listbox
+        self.queue_context_menu = tk.Menu(self.root, tearoff=0)
+        self.queue_context_menu.add_command(label="Download This Item", command=self.download_selected_from_queue)
+        self.queue_context_menu.add_separator()
+        self.queue_context_menu.add_command(label="Move Up", command=self.move_up_in_queue)
+        self.queue_context_menu.add_command(label="Move Down", command=self.move_down_in_queue)
+        self.queue_context_menu.add_separator()
+        self.queue_context_menu.add_command(label="Remove from Queue", command=self.remove_selected_from_queue)
+
+        # Bind right-click to show context menu
+        self.queue_listbox.bind("<Button-3>", self.show_queue_context_menu)
+
+        self.queue_listbox.pack(side="left", fill="both", expand=True)
+        queue_scrollbar.pack(side="right", fill="y")
+
+        # Queue control buttons
+        queue_control_frame = tk.Frame(queue_frame)
+        queue_control_frame.pack(pady=5)
+
+        self.download_selected_button = ttk.Button(queue_control_frame, text="Download Selected", command=self.download_selected_from_queue)
+        self.download_selected_button.pack(side="left", padx=5)
+
+        self.remove_selected_button = ttk.Button(queue_control_frame, text="Remove Selected", command=self.remove_selected_from_queue)
+        self.remove_selected_button.pack(side="left", padx=5)
+
+        self.move_up_button = ttk.Button(queue_control_frame, text="Move Up", command=self.move_up_in_queue)
+        self.move_up_button.pack(side="left", padx=5)
+
+        self.move_down_button = ttk.Button(queue_control_frame, text="Move Down", command=self.move_down_in_queue)
+        self.move_down_button.pack(side="left", padx=5)
+
         # Download buttons
         button_frame = tk.Frame(self.root)
         button_frame.pack(pady=10)
-        self.start_button = ttk.Button(button_frame, text="Start Download", command=self.start_download, state="disabled")
-        self.start_button.pack(side="left", padx=5)
+        self.start_queue_button = ttk.Button(button_frame, text="Start Queue", command=self.start_queue_download)
+        self.start_queue_button.pack(side="left", padx=5)
+        self.start_single_button = ttk.Button(button_frame, text="Download Current", command=self.start_download, state="disabled")
+        self.start_single_button.pack(side="left", padx=5)
         self.stop_button = ttk.Button(button_frame, text="Stop", command=self.stop_download, state="disabled")
         self.stop_button.pack(side="left", padx=5)
 
@@ -170,6 +256,11 @@ class YouTubeDownloaderApp:
         # Status label
         self.status_label = ttk.Label(self.root, text="Enter a YouTube URL and click 'Parse Video' to begin")
         self.status_label.pack(pady=5)
+
+        # Update queue display if there are saved items
+        if self.download_queue:
+            self.update_queue_display()
+            self.status_label.config(text=f"Restored {len(self.download_queue)} items from previous session.")
 
     def choose_folder(self):
         folder = filedialog.askdirectory()
@@ -373,10 +464,281 @@ class YouTubeDownloaderApp:
                 self.thumbnail_label.config(text="No thumbnail", image="")
 
             self.update_resolution_options()
-            self.start_button.config(state="normal")
-            self.status_label.config(text="Video parsed successfully. Select format and quality, then start download.")
+            self.start_single_button.config(state="normal")
+            self.add_to_queue_button.config(state="normal")
+            self.status_label.config(text="Video parsed successfully. Select format and quality, then add to queue or download.")
 
         self.parse_button.config(state="normal")
+
+    def add_to_queue(self):
+        """Add current video to download queue"""
+        if not self.video_info:
+            messagebox.showwarning("No Video", "Please parse a video first.")
+            return
+
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("No URL", "Please enter a video URL.")
+            return
+
+        # Get current settings
+        download_type = self.download_type.get()
+        quality = self.resolution_var.get()
+        title = self.video_info.get('title', 'Unknown Title')
+
+        # Create queue item
+        queue_item = {
+            'url': url,
+            'title': title,
+            'download_type': download_type,
+            'quality': quality,
+            'video_info': self.video_info.copy(),
+            'available_formats': self.available_formats.copy(),
+            'status': 'Queued'
+        }
+
+        # Add to queue
+        self.download_queue.append(queue_item)
+        self.update_queue_display()
+
+        # Clear current video info to allow adding more
+        self.clear_current_video()
+
+        self.status_label.config(text=f"Added '{title}' to queue. Total items: {len(self.download_queue)}")
+
+    def clear_current_video(self):
+        """Clear current video information to allow parsing new video"""
+        self.url_entry.delete(0, tk.END)
+        self.video_info = None
+        self.available_formats = []
+        self.video_title_label.config(text="")
+        self.thumbnail_label.config(text="", image="")
+        self.thumbnail_image = None
+
+        # Clear resolution options
+        for button in self.resolution_buttons:
+            button.destroy()
+        self.resolution_buttons.clear()
+        self.resolution_label.grid_forget()
+
+        # Reset button states
+        self.start_single_button.config(state="disabled")
+        self.add_to_queue_button.config(state="disabled")
+
+    def update_queue_display(self):
+        """Update the queue listbox display"""
+        self.queue_listbox.delete(0, tk.END)
+
+        for i, item in enumerate(self.download_queue):
+            status_icon = "⏳" if item['status'] == 'Queued' else "📥" if item['status'] == 'Downloading' else "✅" if item['status'] == 'Completed' else "❌"
+            format_text = f"{item['download_type'].upper()}"
+            if item['quality'] != 'best':
+                if item['download_type'] == 'mp3':
+                    format_text += f" {item['quality']} kbps"
+                else:
+                    format_text += f" {item['quality']}p"
+            else:
+                format_text += " Best"
+
+            display_text = f"{status_icon} {item['title']} ({format_text})"
+            self.queue_listbox.insert(tk.END, display_text)
+
+            # Highlight current download
+            if self.is_queue_processing and i == self.current_download_index:
+                self.queue_listbox.selection_set(i)
+
+    def clear_queue(self):
+        """Clear all items from the download queue"""
+        if self.is_queue_processing:
+            messagebox.showwarning("Queue Active", "Cannot clear queue while downloads are in progress.")
+            return
+
+        if self.download_queue:
+            result = messagebox.askyesno("Clear Queue", f"Are you sure you want to clear all {len(self.download_queue)} items from the queue?")
+            if result:
+                self.download_queue.clear()
+                self.update_queue_display()
+                self.status_label.config(text="Queue cleared.")
+
+    def remove_selected_from_queue(self):
+        """Remove selected item from queue"""
+        selection = self.queue_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to remove.")
+            return
+
+        if self.is_queue_processing or self.stop_button['state'] == 'normal':
+            messagebox.showwarning("Download Active", "Cannot modify queue while downloads are in progress.")
+            return
+
+        index = selection[0]
+        removed_item = self.download_queue.pop(index)
+        self.update_queue_display()
+        self.status_label.config(text=f"Removed '{removed_item['title']}' from queue.")
+
+    def move_up_in_queue(self):
+        """Move selected item up in queue"""
+        selection = self.queue_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to move.")
+            return
+
+        if self.is_queue_processing or self.stop_button['state'] == 'normal':
+            messagebox.showwarning("Download Active", "Cannot modify queue while downloads are in progress.")
+            return
+
+        index = selection[0]
+        if index > 0:
+            # Swap items
+            self.download_queue[index], self.download_queue[index-1] = self.download_queue[index-1], self.download_queue[index]
+            self.update_queue_display()
+            self.queue_listbox.selection_set(index-1)
+
+    def move_down_in_queue(self):
+        """Move selected item down in queue"""
+        selection = self.queue_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to move.")
+            return
+
+        if self.is_queue_processing or self.stop_button['state'] == 'normal':
+            messagebox.showwarning("Download Active", "Cannot modify queue while downloads are in progress.")
+            return
+
+        index = selection[0]
+        if index < len(self.download_queue) - 1:
+            # Swap items
+            self.download_queue[index], self.download_queue[index+1] = self.download_queue[index+1], self.download_queue[index]
+            self.update_queue_display()
+            self.queue_listbox.selection_set(index+1)
+
+    def show_queue_context_menu(self, event):
+        """Show context menu for queue listbox"""
+        # Select the item under cursor
+        index = self.queue_listbox.nearest(event.y)
+        self.queue_listbox.selection_clear(0, tk.END)
+        self.queue_listbox.selection_set(index)
+
+        # Show context menu
+        try:
+            self.queue_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.queue_context_menu.grab_release()
+
+    def download_selected_from_queue(self):
+        """Download selected item from queue immediately"""
+        selection = self.queue_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select an item to download.")
+            return
+
+        if self.is_queue_processing:
+            messagebox.showwarning("Queue Active", "Cannot download individual items while queue is processing. Stop the queue first.")
+            return
+
+        # Check if any download is currently in progress
+        if self.stop_button['state'] == 'normal':
+            messagebox.showwarning("Download Active", "Another download is currently in progress. Please wait for it to complete or stop it first.")
+            return
+
+        index = selection[0]
+        queue_item = self.download_queue[index]
+
+        # Check if item is already completed
+        if queue_item['status'] == 'Completed':
+            messagebox.showinfo("Already Downloaded", f"'{queue_item['title']}' has already been downloaded.")
+            return
+
+        # Confirm download
+        result = messagebox.askyesno("Download Selected",
+                                   f"Download '{queue_item['title']}' ({queue_item['download_type'].upper()} {queue_item['quality']}) now?")
+        if not result:
+            return
+
+        # Update item status
+        queue_item['status'] = 'Downloading'
+        self.update_queue_display()
+
+        # Disable relevant buttons
+        self.start_queue_button.config(state="disabled")
+        self.start_single_button.config(state="disabled")
+        self.download_selected_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+
+        # Start download in separate thread
+        threading.Thread(target=self.download_selected_item, args=(queue_item,)).start()
+
+    def download_selected_item(self, queue_item):
+        """Download a selected queue item"""
+        try:
+            self.cancel_requested = False
+
+            # Set up video info for this download
+            self.video_info = queue_item['video_info'] if queue_item['video_info'] else {}
+            self.available_formats = queue_item['available_formats'] if queue_item['available_formats'] else []
+
+            # If video info is empty, we need to parse it first
+            if not self.video_info:
+                self.root.after(0, lambda: self.status_label.config(text=f"Parsing video info for: {queue_item['title']}"))
+                success = self.parse_queue_item_info(queue_item)
+                if not success:
+                    queue_item['status'] = 'Failed'
+                    self.root.after(0, self.update_queue_display)
+                    self.root.after(0, lambda: self.status_label.config(text=f"Failed to parse: {queue_item['title']}"))
+                    return
+
+            # Download the video
+            self.root.after(0, lambda: self.status_label.config(text=f"Downloading selected: {queue_item['title']}"))
+            success = self.download_video_from_queue(queue_item)
+
+            # Update status
+            if success and not self.cancel_requested:
+                queue_item['status'] = 'Completed'
+                self.root.after(0, lambda: self.status_label.config(text=f"Successfully downloaded: {queue_item['title']}"))
+            else:
+                queue_item['status'] = 'Failed' if not self.cancel_requested else 'Queued'
+                status_text = f"Failed to download: {queue_item['title']}" if not self.cancel_requested else f"Download cancelled: {queue_item['title']}"
+                self.root.after(0, lambda: self.status_label.config(text=status_text))
+
+            # Update display
+            self.root.after(0, self.update_queue_display)
+
+        except Exception as e:
+            error_msg = f"Error downloading {queue_item['title']}: {e}"
+            print(error_msg)
+            queue_item['status'] = 'Failed'
+            self.root.after(0, self.update_queue_display)
+            self.root.after(0, lambda: self.status_label.config(text=error_msg))
+        finally:
+            # Reset button states
+            self.root.after(0, self.reset_download_buttons)
+
+    def parse_queue_item_info(self, queue_item):
+        """Parse video information for a queue item that doesn't have it"""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+            }
+
+            with YoutubeDL(ydl_opts) as ydl:
+                video_info = ydl.extract_info(queue_item['url'], download=False)
+                available_formats = video_info.get('formats', [])
+
+                # Update queue item with parsed info
+                queue_item['video_info'] = video_info
+                queue_item['available_formats'] = available_formats
+
+                # Update the global variables for download
+                self.video_info = video_info
+                self.available_formats = available_formats
+
+                return True
+
+        except Exception as e:
+            print(f"Error parsing queue item {queue_item['title']}: {e}")
+            return False
 
     def update_resolution_options(self):
         """Update resolution options based on download type and available formats"""
@@ -506,16 +868,160 @@ class YouTubeDownloaderApp:
                 self.resolution_buttons.append(rb)
 
     def stop_download(self):
+        """Stop current download or queue processing"""
         self.cancel_requested = True
-        self.status_label.config(text="Stopping download...")
-        # Reset progress bar, speed display, elapsed time, and download phase when stopping
+
+        if self.is_queue_processing:
+            self.status_label.config(text="Stopping queue...")
+            self.is_queue_processing = False
+        else:
+            self.status_label.config(text="Stopping download...")
+
+        # Reset progress indicators
         self.progress_var.set(0)
         self.speed_label.config(text="")
         self.elapsed_time_label.config(text="")
         self.download_phase_label.config(text="")
         self.current_download_phase = ""
 
+        # Reset button states
+        self.reset_download_buttons()
+
+    def reset_download_buttons(self):
+        """Reset download button states"""
+        self.start_queue_button.config(state="normal")
+        self.download_selected_button.config(state="normal")
+        if self.video_info:
+            self.start_single_button.config(state="normal")
+        self.stop_button.config(state="disabled")
+
+    def start_queue_download(self):
+        """Start downloading all items in the queue"""
+        if not self.download_queue:
+            messagebox.showinfo("Empty Queue", "No items in download queue. Add some videos first.")
+            return
+
+        if self.is_queue_processing:
+            messagebox.showinfo("Queue Active", "Queue download is already in progress.")
+            return
+
+        self.is_queue_processing = True
+        self.current_download_index = 0
+        self.cancel_requested = False
+
+        # Update button states
+        self.start_queue_button.config(state="disabled")
+        self.start_single_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+
+        # Start queue processing
+        threading.Thread(target=self.process_download_queue).start()
+
+    def process_download_queue(self):
+        """Process all items in the download queue"""
+        total_items = len(self.download_queue)
+
+        for i, queue_item in enumerate(self.download_queue):
+            if self.cancel_requested:
+                break
+
+            self.current_download_index = i
+            queue_item['status'] = 'Downloading'
+
+            # Update display in main thread
+            self.root.after(0, self.update_queue_display)
+            self.root.after(0, lambda: self.status_label.config(text=f"Downloading {i+1}/{total_items}: {queue_item['title']}"))
+
+            # Set up video info for this download
+            self.video_info = queue_item['video_info']
+            self.available_formats = queue_item['available_formats']
+
+            # Download the video
+            success = self.download_video_from_queue(queue_item)
+
+            # Update status
+            if success and not self.cancel_requested:
+                queue_item['status'] = 'Completed'
+                self.root.after(0, lambda: self.status_label.config(text=f"Completed {i+1}/{total_items}: {queue_item['title']}"))
+            else:
+                queue_item['status'] = 'Failed'
+                self.root.after(0, lambda: self.status_label.config(text=f"Failed {i+1}/{total_items}: {queue_item['title']}"))
+
+            # Update display
+            self.root.after(0, self.update_queue_display)
+
+            # Small delay between downloads
+            if not self.cancel_requested and i < total_items - 1:
+                time.sleep(1)
+
+        # Queue processing complete
+        self.is_queue_processing = False
+        completed_count = sum(1 for item in self.download_queue if item['status'] == 'Completed')
+
+        self.root.after(0, lambda: self.status_label.config(text=f"Queue complete! {completed_count}/{total_items} downloads successful."))
+        self.root.after(0, self.reset_download_buttons)
+
+    def download_video_from_queue(self, queue_item):
+        """Download a single video from queue item"""
+        try:
+            url = queue_item['url']
+            download_type = queue_item['download_type']
+            quality = queue_item['quality']
+
+            # Reset progress bar and indicators
+            self.root.after(0, lambda: self.progress_var.set(0))
+            self.root.after(0, lambda: self.speed_label.config(text=""))
+            self.root.after(0, lambda: self.download_phase_label.config(text=""))
+            self.root.after(0, lambda: self.elapsed_time_label.config(text=""))
+
+            self.download_start_time = time.time()
+            self.current_download_phase = ""
+
+            # Build format selector
+            is_mp3 = download_type == "mp3"
+            if is_mp3:
+                format_selector = "bestaudio/best"
+            else:
+                if quality == "best":
+                    format_selector = "bestvideo+bestaudio/best"
+                else:
+                    height = quality
+                    format_selector = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+
+            ydl_opts = {
+                "format": format_selector,
+                "ffmpeg_location": self.ffmpeg_path,
+                "outtmpl": os.path.join(self.output_dir, "%(title)s.%(ext)s"),
+                "postprocessors": [],
+                "progress_hooks": [self.progress_hook]
+            }
+
+            if is_mp3:
+                audio_quality = quality if quality != "best" else "192"
+                ydl_opts["postprocessors"].append({
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": audio_quality,
+                })
+            else:
+                ydl_opts["postprocessors"].append({
+                    "key": "FFmpegVideoConvertor",
+                    "preferedformat": "mp4"
+                })
+
+            # Download the video
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            return True
+
+        except Exception as e:
+            error_msg = f"Error downloading {queue_item['title']}: {e}"
+            print(error_msg)
+            return False
+
     def start_download(self):
+        """Start downloading current single video"""
         self.cancel_requested = False
         url = self.url_entry.get().strip()
         if not url:
@@ -526,7 +1032,8 @@ class YouTubeDownloaderApp:
             messagebox.showwarning("Parse Required", "Please parse the video first by clicking 'Parse Video'.")
             return
 
-        self.start_button.config(state="disabled")
+        self.start_single_button.config(state="disabled")
+        self.start_queue_button.config(state="disabled")
         self.stop_button.config(state="normal")
 
         threading.Thread(target=self.download_video, args=(url,)).start()
@@ -689,8 +1196,7 @@ class YouTubeDownloaderApp:
             self.elapsed_time_label.config(text="")
             self.download_phase_label.config(text="")
         finally:
-            self.start_button.config(state="normal")
-            self.stop_button.config(state="disabled")
+            self.reset_download_buttons()
 
 
 if __name__ == "__main__":
