@@ -15,6 +15,15 @@ import sys
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 # Import yt-dlp
 try:
     from yt_dlp import YoutubeDL
@@ -79,8 +88,9 @@ class ModernYouTubeDownloader:
         
         # Set window icon
         try:
-            if os.path.exists("youtube-downloader.ico"):
-                self.root.iconbitmap("youtube-downloader.ico")
+            icon_path = get_resource_path("youtube-downloader.ico")
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
         except:
             pass
 
@@ -99,9 +109,16 @@ class ModernYouTubeDownloader:
 
     def setup_variables(self):
         """Initialize all application variables"""
-        # Configuration
-        self.config_file = "config.json"
-        self.output_dir = os.path.join(os.getcwd(), "downloaded_media")
+        # Configuration - use proper paths for PyInstaller builds
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller executable - use executable directory
+            app_dir = os.path.dirname(sys.executable)
+        else:
+            # Running as Python script - use script directory
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.config_file = os.path.join(app_dir, "config.json")
+        self.output_dir = os.path.join(app_dir, "downloaded_media")
         self.max_concurrent_downloads = 3
         self.download_speed_limit = None
         
@@ -959,30 +976,25 @@ class ModernYouTubeDownloader:
             except Exception as e:
                 print(f"Directory write test: FAILED ({self.output_dir}) - {e}")
 
-            # Try a different approach - download best single format instead of merging
-            if quality == 'best':
-                # Use best single format to avoid merging
-                format_selector = "best"
-            else:
-                # Try single format first, fallback to merging
-                height = quality
-                format_selector = f"best[height<={height}]/bestvideo[height<={height}]+bestaudio/best[height<={height}]"
-
+            # Use EXACT ydl_opts from working version
             ydl_opts = {
                 "format": format_selector,
                 "ffmpeg_location": ffmpeg_path,
                 "outtmpl": output_template,
                 "postprocessors": [],
                 "progress_hooks": [self.progress_hook],
-                "continuedl": True,
-                "part": True,
-                "mtime": True,
-                # Add verbose logging to see what's happening
-                "verbose": True,
+                "continuedl": True,  # Enable resume functionality
+                "part": True,  # Create .part files for resuming
+                "mtime": True,  # Preserve modification time
+                "quiet": True,  # Reduce output for stability
+                "no_warnings": True
             }
 
             print(f"FFmpeg found at: {ffmpeg_path}")
             print(f"Using format selector: {format_selector}")
+            print(f"Output template: {output_template}")
+            print(f"Output directory exists: {os.path.exists(self.output_dir)}")
+            print(f"Output directory writable: {os.access(self.output_dir, os.W_OK)}")
 
             # Add postprocessors EXACTLY like the working version
             if is_mp3:
@@ -999,10 +1011,7 @@ class ModernYouTubeDownloader:
                     "preferedformat": "mp4"
                 })
 
-            # Add FFmpeg location if available
-            ffmpeg_path = self.get_ffmpeg_path()
-            if ffmpeg_path:
-                ydl_opts['ffmpeg_location'] = ffmpeg_path
+
 
             print(f"Downloading: {item['title']}")
             print(f"URL: {url}")
@@ -1049,7 +1058,21 @@ class ModernYouTubeDownloader:
             error_msg = f"Download failed: {str(e)}"
             self.root.after(0, lambda: self.update_queue_display())
             self.root.after(0, lambda: self.status_label.configure(text=error_msg))
-            print(f"Download error for {item['title']}: {e}")
+
+            # Comprehensive error logging
+            print(f"=" * 60)
+            print(f"DOWNLOAD ERROR DETAILS:")
+            print(f"=" * 60)
+            print(f"Video: {item['title']}")
+            print(f"URL: {item['url']}")
+            print(f"Error: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
+
+            # Import traceback for detailed error info
+            import traceback
+            print(f"Full traceback:")
+            traceback.print_exc()
+            print(f"=" * 60)
 
     def sanitize_filename(self, filename):
         """Sanitize filename for safe file system usage"""
@@ -1099,18 +1122,39 @@ class ModernYouTubeDownloader:
             return f'best[height<={quality}]/worst[height>={quality}]/best/worst'
 
     def get_ffmpeg_path(self):
-        """Get FFmpeg path"""
-        # Check if FFmpeg is in the same directory (for portable version)
-        local_ffmpeg = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ffmpeg', 'ffmpeg.exe')
-        if os.path.exists(local_ffmpeg):
-            return os.path.dirname(local_ffmpeg)
+        """Get FFmpeg path - works for both development and PyInstaller builds"""
+        # For PyInstaller builds, check the bundled ffmpeg directory
+        bundled_ffmpeg_dir = get_resource_path('ffmpeg')
+        bundled_ffmpeg_exe = os.path.join(bundled_ffmpeg_dir, 'ffmpeg.exe')
+        if os.path.exists(bundled_ffmpeg_exe):
+            print(f"Found bundled FFmpeg at: {bundled_ffmpeg_dir}")
+            return bundled_ffmpeg_dir
 
-        # Check if FFmpeg is in ffmpeg subdirectory
+        # Check if FFmpeg is in the same directory as the executable (for portable version)
+        try:
+            if getattr(sys, 'frozen', False):
+                # Running as PyInstaller executable
+                exe_dir = os.path.dirname(sys.executable)
+            else:
+                # Running as Python script
+                exe_dir = os.path.dirname(os.path.abspath(__file__))
+
+            local_ffmpeg_dir = os.path.join(exe_dir, 'ffmpeg')
+            local_ffmpeg_exe = os.path.join(local_ffmpeg_dir, 'ffmpeg.exe')
+            if os.path.exists(local_ffmpeg_exe):
+                print(f"Found local FFmpeg at: {local_ffmpeg_dir}")
+                return local_ffmpeg_dir
+        except Exception as e:
+            print(f"Error checking local FFmpeg: {e}")
+
+        # Check if FFmpeg is in ffmpeg subdirectory of current working directory
         ffmpeg_dir = os.path.join(os.getcwd(), 'ffmpeg')
         ffmpeg_exe = os.path.join(ffmpeg_dir, 'ffmpeg.exe')
         if os.path.exists(ffmpeg_exe):
+            print(f"Found FFmpeg in working directory: {ffmpeg_dir}")
             return ffmpeg_dir
 
+        print("FFmpeg not found in any expected location")
         return None
 
     def progress_hook(self, d):

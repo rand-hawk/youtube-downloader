@@ -5,7 +5,7 @@ import urllib.request
 import zipfile
 
 SCRIPT_NAME = "youtube-download-gui-modern.py"
-EXE_NAME = "youtube-downloader-v2.0"
+EXE_NAME = "youtube-downloader-v2.0-portable"
 ICON_FILE = "youtube-downloader.ico"
 CONFIG_FILE = "config.json"
 IMAGE_FILE = "youtube-downloader-icon.png"
@@ -81,8 +81,7 @@ a = Analysis(
         ('{ICON_FILE}', '.'),
         ('{CONFIG_FILE}', '.'),
         ('{IMAGE_FILE}', '.'),
-        ('{FFMPEG_DIR}/ffmpeg.exe', 'ffmpeg'),
-        ('{FFMPEG_DIR}/ffprobe.exe', 'ffmpeg'),
+        ('{FFMPEG_DIR}', 'ffmpeg'),
     ],
     hiddenimports=[
         # CustomTkinter and modern UI
@@ -204,8 +203,12 @@ def build_exe():
     # Create spec file for better control
     create_spec_file()
 
+    # Use the virtual environment's PyInstaller
+    import sys
+    venv_python = sys.executable
+
     pyinstaller_cmd = [
-        "pyinstaller",
+        venv_python, "-m", "PyInstaller",
         "--clean",
         "--noconfirm",
         "youtube-downloader.spec"
