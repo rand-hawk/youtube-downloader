@@ -47,7 +47,7 @@ class InterruptibleYoutubeDL(YoutubeDL):
 class YouTubeDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("YouTube Downloader")
+        self.root.title("YouTube Downloader v2.0")
         try:
             if os.path.exists(ICON_FILE):
                 self.root.iconphoto(False, tk.PhotoImage(file=ICON_FILE))

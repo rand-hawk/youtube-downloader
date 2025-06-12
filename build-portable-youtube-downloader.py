@@ -4,7 +4,7 @@ import shutil
 import urllib.request
 import zipfile
 
-SCRIPT_NAME = "youtube-download-gui-v1.py"
+SCRIPT_NAME = "youtube-download-gui-modern.py"
 PORTABLE_EXE_NAME = "youtube-downloader-portable"
 ICON_FILE = "youtube-downloader.ico"
 CONFIG_FILE = "config.json"
@@ -85,6 +85,11 @@ a = Analysis(
         ('{FFMPEG_DIR}/ffprobe.exe', 'ffmpeg'),
     ],
     hiddenimports=[
+        # CustomTkinter and modern UI
+        'customtkinter',
+        'darkdetect',
+        'packaging',
+
         # Core yt-dlp modules
         'yt_dlp',
         'yt_dlp.YoutubeDL',
@@ -279,7 +284,7 @@ Enjoy your portable YouTube downloading experience!
 def create_portable_zip():
     """Create a ZIP file of the portable package for easy distribution"""
     portable_package_dir = os.path.join(DIST_DIR, "YouTube-Downloader-Portable")
-    zip_filename = os.path.join(DIST_DIR, "YouTube-Downloader-Portable-v1.0.zip")
+    zip_filename = os.path.join(DIST_DIR, "YouTube-Downloader-Portable-v2.0.zip")
 
     if os.path.exists(portable_package_dir):
         try:
@@ -317,7 +322,7 @@ def main():
         print("🎉 Portable build completed successfully!")
         print(f"📁 Portable Package: {DIST_DIR}\\YouTube-Downloader-Portable\\")
         print(f"📱 Executable: YouTube-Downloader.exe")
-        print(f"📦 ZIP Package: {DIST_DIR}\\YouTube-Downloader-Portable-v1.0.zip")
+        print(f"📦 ZIP Package: {DIST_DIR}\\YouTube-Downloader-Portable-v2.0.zip")
         print("🎯 No installation required - run from anywhere!")
         print("✅ FFmpeg included and configured automatically")
         print("📋 README.txt included with usage instructions")
