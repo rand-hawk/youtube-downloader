@@ -47,7 +47,7 @@ class InterruptibleYoutubeDL(YoutubeDL):
 class YouTubeDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("YouTube Downloader")
+        self.root.title("YouTube Downloader v2.0")
         try:
             if os.path.exists(ICON_FILE):
                 self.root.iconphoto(False, tk.PhotoImage(file=ICON_FILE))
@@ -65,6 +65,11 @@ class YouTubeDownloaderApp:
         self.download_queue = []
         self.current_download_index = 0
         self.is_queue_processing = False
+
+        # Playlist processing
+        self.playlist_info = None
+        self.playlist_entries = []
+        self.playlist_selections = {}  # Track selected items and their qualities
 
         # Clipboard monitoring
         self.clipboard_monitoring = True
@@ -307,8 +312,30 @@ class YouTubeDownloaderApp:
             json.dump(config, f, indent=4)
 
     def setup_widgets(self):
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Single Video Tab
+        self.single_video_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.single_video_frame, text="Single Video")
+
+        # Playlist Tab
+        self.playlist_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.playlist_frame, text="Playlist")
+
+        # Setup single video tab
+        self.setup_single_video_tab()
+
+        # Setup playlist tab
+        self.setup_playlist_tab()
+
+        # Setup common elements (queue, settings, etc.)
+        self.setup_common_widgets()
+
+    def setup_single_video_tab(self):
         # URL input section
-        url_frame = tk.Frame(self.root)
+        url_frame = tk.Frame(self.single_video_frame)
         url_frame.pack(pady=(10, 5), fill="x", padx=10)
 
         self.url_label = ttk.Label(url_frame, text="YouTube Video URL:")
@@ -324,7 +351,7 @@ class YouTubeDownloaderApp:
         self.parse_button.pack(side="right", padx=(5, 0))
 
         # Video info section
-        self.info_frame = tk.Frame(self.root)
+        self.info_frame = tk.Frame(self.single_video_frame)
         self.info_frame.pack(pady=5, fill="x", padx=10)
 
         # Create a frame for thumbnail and video info side by side
@@ -347,22 +374,109 @@ class YouTubeDownloaderApp:
 
         # Download format section
         self.download_type = tk.StringVar(value="mp4")  # Default to video
-        format_frame = tk.Frame(self.root)
+        format_frame = tk.Frame(self.single_video_frame)
         format_frame.pack(pady=10)
         ttk.Label(format_frame, text="Download Format:").pack()
         ttk.Radiobutton(format_frame, text="MP3 (Audio)", variable=self.download_type, value="mp3", command=self.update_resolution_options).pack()
         ttk.Radiobutton(format_frame, text="MP4 (Video)", variable=self.download_type, value="mp4", command=self.update_resolution_options).pack()
 
         # Resolution selection section
-        self.resolution_frame = tk.Frame(self.root)
+        self.resolution_frame = tk.Frame(self.single_video_frame)
         self.resolution_frame.pack(pady=10)
         self.resolution_label = ttk.Label(self.resolution_frame, text="Video Quality:")
         self.resolution_var = tk.StringVar(value="best")
         self.resolution_buttons = []
 
+        # Single video action buttons
+        single_button_frame = tk.Frame(self.single_video_frame)
+        single_button_frame.pack(pady=10)
+        self.add_to_queue_button = ttk.Button(single_button_frame, text="Add to Queue", command=self.add_to_queue, state="disabled")
+        self.add_to_queue_button.pack(side="left", padx=5)
+        self.start_single_button = ttk.Button(single_button_frame, text="Download Current", command=self.start_download, state="disabled")
+        self.start_single_button.pack(side="left", padx=5)
+
+    def setup_playlist_tab(self):
+        # Playlist URL input section
+        playlist_url_frame = tk.Frame(self.playlist_frame)
+        playlist_url_frame.pack(pady=(10, 5), fill="x", padx=10)
+
+        ttk.Label(playlist_url_frame, text="YouTube Playlist URL:").pack(anchor="w")
+
+        playlist_input_frame = tk.Frame(playlist_url_frame)
+        playlist_input_frame.pack(fill="x", pady=5)
+
+        self.playlist_url_entry = tk.Entry(playlist_input_frame, width=70)
+        self.playlist_url_entry.pack(side="left", fill="x", expand=True)
+
+        self.parse_playlist_button = ttk.Button(playlist_input_frame, text="Parse Playlist", command=self.parse_playlist)
+        self.parse_playlist_button.pack(side="right", padx=(5, 0))
+
+        # Playlist info section
+        self.playlist_info_frame = tk.Frame(self.playlist_frame)
+        self.playlist_info_frame.pack(pady=5, fill="x", padx=10)
+
+        self.playlist_title_label = ttk.Label(self.playlist_info_frame, text="", wraplength=600)
+        self.playlist_title_label.pack(anchor="w")
+
+        # Playlist items section
+        playlist_items_frame = tk.Frame(self.playlist_frame)
+        playlist_items_frame.pack(pady=5, fill="both", expand=True, padx=10)
+
+        ttk.Label(playlist_items_frame, text="Playlist Items:").pack(anchor="w")
+
+        # Create playlist listbox with scrollbar
+        playlist_list_frame = tk.Frame(playlist_items_frame)
+        playlist_list_frame.pack(fill="both", expand=True)
+
+        self.playlist_listbox = tk.Listbox(playlist_list_frame, height=8, selectmode=tk.EXTENDED)
+        playlist_scrollbar = ttk.Scrollbar(playlist_list_frame, orient="vertical", command=self.playlist_listbox.yview)
+        self.playlist_listbox.configure(yscrollcommand=playlist_scrollbar.set)
+
+        self.playlist_listbox.pack(side="left", fill="both", expand=True)
+        playlist_scrollbar.pack(side="right", fill="y")
+
+        # Playlist controls
+        playlist_controls_frame = tk.Frame(playlist_items_frame)
+        playlist_controls_frame.pack(pady=5, fill="x")
+
+        # Selection controls
+        selection_frame = tk.Frame(playlist_controls_frame)
+        selection_frame.pack(side="left", fill="x", expand=True)
+
+        ttk.Button(selection_frame, text="Select All", command=self.select_all_playlist_items).pack(side="left", padx=2)
+        ttk.Button(selection_frame, text="Select None", command=self.select_none_playlist_items).pack(side="left", padx=2)
+
+        # Format and quality selection for playlist
+        format_quality_frame = tk.Frame(playlist_controls_frame)
+        format_quality_frame.pack(side="right")
+
+        ttk.Label(format_quality_frame, text="Format:").pack(side="left")
+        self.playlist_download_type = tk.StringVar(value="mp4")
+        ttk.Radiobutton(format_quality_frame, text="MP3", variable=self.playlist_download_type, value="mp3").pack(side="left", padx=2)
+        ttk.Radiobutton(format_quality_frame, text="MP4", variable=self.playlist_download_type, value="mp4").pack(side="left", padx=2)
+
+        ttk.Label(format_quality_frame, text="Quality:").pack(side="left", padx=(10, 0))
+        self.playlist_quality_var = tk.StringVar(value="720")
+        quality_combo = ttk.Combobox(format_quality_frame, textvariable=self.playlist_quality_var, width=8, state="readonly")
+        quality_combo['values'] = ('144', '240', '360', '480', '720', '1080', 'best')
+        quality_combo.pack(side="left", padx=2)
+
+        # Playlist action buttons
+        playlist_button_frame = tk.Frame(playlist_items_frame)
+        playlist_button_frame.pack(pady=5)
+
+        self.add_selected_to_queue_button = ttk.Button(playlist_button_frame, text="Add Selected to Queue",
+                                                      command=self.add_selected_playlist_items_to_queue, state="disabled")
+        self.add_selected_to_queue_button.pack(side="left", padx=5)
+
+    def setup_common_widgets(self):
+        # Create a frame at the bottom for common widgets
+        common_frame = tk.Frame(self.root)
+        common_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
         # Folder settings
-        folder_frame = tk.Frame(self.root)
-        folder_frame.pack(pady=5, fill="x", padx=10)
+        folder_frame = tk.Frame(common_frame)
+        folder_frame.pack(pady=5, fill="x")
         ttk.Label(folder_frame, text="Save to:").pack(side="left")
         self.folder_label = ttk.Label(folder_frame, text=self.output_dir, width=45)
         self.folder_label.pack(side="left", padx=5)
@@ -370,8 +484,8 @@ class YouTubeDownloaderApp:
         ttk.Button(folder_frame, text="Open Folder", command=self.open_download_folder).pack(side="left")
 
         # Performance and clipboard settings
-        settings_frame = tk.Frame(self.root)
-        settings_frame.pack(pady=5, fill="x", padx=10)
+        settings_frame = tk.Frame(common_frame)
+        settings_frame.pack(pady=5, fill="x")
 
         # Clipboard monitoring
         clipboard_frame = tk.Frame(settings_frame)
@@ -400,10 +514,8 @@ class YouTubeDownloaderApp:
         speed_limit_entry.bind('<FocusOut>', self.update_speed_limit)
 
         # Queue management buttons
-        queue_button_frame = tk.Frame(self.root)
+        queue_button_frame = tk.Frame(common_frame)
         queue_button_frame.pack(pady=5)
-        self.add_to_queue_button = ttk.Button(queue_button_frame, text="Add to Queue", command=self.add_to_queue, state="disabled")
-        self.add_to_queue_button.pack(side="left", padx=5)
         self.clear_queue_button = ttk.Button(queue_button_frame, text="Clear Queue", command=self.clear_queue)
         self.clear_queue_button.pack(side="left", padx=5)
 
@@ -411,8 +523,8 @@ class YouTubeDownloaderApp:
         self.resume_button.pack(side="left", padx=5)
 
         # Download queue display
-        queue_frame = tk.Frame(self.root)
-        queue_frame.pack(pady=5, fill="both", expand=True, padx=10)
+        queue_frame = tk.Frame(common_frame)
+        queue_frame.pack(pady=5, fill="both", expand=True)
 
         ttk.Label(queue_frame, text="Download Queue:").pack(anchor="w")
 
@@ -456,18 +568,16 @@ class YouTubeDownloaderApp:
         self.move_down_button.pack(side="left", padx=5)
 
         # Download buttons
-        button_frame = tk.Frame(self.root)
+        button_frame = tk.Frame(common_frame)
         button_frame.pack(pady=10)
         self.start_queue_button = ttk.Button(button_frame, text="Start Queue", command=self.start_queue_download)
         self.start_queue_button.pack(side="left", padx=5)
-        self.start_single_button = ttk.Button(button_frame, text="Download Current", command=self.start_download, state="disabled")
-        self.start_single_button.pack(side="left", padx=5)
         self.stop_button = ttk.Button(button_frame, text="Stop", command=self.stop_download, state="disabled")
         self.stop_button.pack(side="left", padx=5)
 
         # Progress bar
-        progress_frame = tk.Frame(self.root)
-        progress_frame.pack(pady=5, fill="x", padx=10)
+        progress_frame = tk.Frame(common_frame)
+        progress_frame.pack(pady=5, fill="x")
 
         progress_header_frame = tk.Frame(progress_frame)
         progress_header_frame.pack(fill="x")
@@ -490,7 +600,7 @@ class YouTubeDownloaderApp:
         self.progress_bar.pack(fill="x", pady=2)
 
         # Status label
-        self.status_label = ttk.Label(self.root, text="Enter a YouTube URL and click 'Parse Video' to begin")
+        self.status_label = ttk.Label(common_frame, text="Enter a YouTube URL and click 'Parse Video' to begin")
         self.status_label.pack(pady=5)
 
         # Update queue display if there are saved items
@@ -547,7 +657,8 @@ class YouTubeDownloaderApp:
             current_clipboard = pyperclip.paste()
             if current_clipboard != self.last_clipboard_content:
                 self.last_clipboard_content = current_clipboard
-                if self.is_youtube_url(current_clipboard):
+                # Only handle single video URLs, not playlists
+                if self.is_youtube_video_url(current_clipboard):
                     self.handle_clipboard_url(current_clipboard)
         except Exception as e:
             print(f"Clipboard monitoring error: {e}")
@@ -569,6 +680,43 @@ class YouTubeDownloaderApp:
         ]
 
         for pattern in youtube_patterns:
+            if re.match(pattern, url.strip()):
+                return True
+        return False
+
+    def is_playlist_url(self, url):
+        """Check if URL is a YouTube playlist URL"""
+        if not url or not isinstance(url, str):
+            return False
+
+        playlist_patterns = [
+            r'(?:https?://)?(?:www\.)?youtube\.com/playlist\?list=[\w-]+',
+            r'(?:https?://)?(?:www\.)?youtube\.com/watch\?.*list=[\w-]+',
+        ]
+
+        for pattern in playlist_patterns:
+            if re.search(pattern, url.strip()):
+                return True
+        return False
+
+    def is_youtube_video_url(self, url):
+        """Check if URL is a valid YouTube single video URL (not playlist)"""
+        if not url or not isinstance(url, str):
+            return False
+
+        # First check if it's a playlist URL
+        if self.is_playlist_url(url):
+            return False
+
+        # Check for valid single video patterns
+        video_patterns = [
+            r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+(?:&(?!list=)[\w=&-]*)*$',
+            r'(?:https?://)?(?:www\.)?youtu\.be/[\w-]+(?:\?(?!list=)[\w=&-]*)*$',
+            r'(?:https?://)?(?:www\.)?youtube\.com/embed/[\w-]+(?:\?(?!list=)[\w=&-]*)*$',
+            r'(?:https?://)?(?:www\.)?youtube\.com/v/[\w-]+(?:\?(?!list=)[\w=&-]*)*$',
+        ]
+
+        for pattern in video_patterns:
             if re.match(pattern, url.strip()):
                 return True
         return False
@@ -633,13 +781,224 @@ class YouTubeDownloaderApp:
             self.speed_limit_var.set("" if self.download_speed_limit is None else str(self.download_speed_limit))
             messagebox.showwarning("Invalid Speed", "Please enter a valid positive number for speed limit (KB/s)")
 
+    def parse_playlist(self):
+        """Parse the playlist URL and extract video information"""
+        url = self.playlist_url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("Input Error", "Please enter a YouTube playlist URL.")
+            return
 
+        if not self.is_playlist_url(url):
+            messagebox.showwarning("Invalid URL", "Please enter a valid YouTube playlist URL.")
+            return
+
+        # Convert watch URL with list parameter to proper playlist URL
+        playlist_url = self.convert_to_playlist_url(url)
+
+        self.parse_playlist_button.config(state="disabled")
+        self.playlist_title_label.config(text="Parsing playlist information...")
+        self.playlist_listbox.delete(0, tk.END)
+        self.add_selected_to_queue_button.config(state="disabled")
+
+        # Run parsing in a separate thread to avoid freezing the GUI
+        threading.Thread(target=self._parse_playlist_thread, args=(playlist_url,)).start()
+
+    def convert_to_playlist_url(self, url):
+        """Convert various YouTube playlist URL formats to the standard playlist URL"""
+        import re
+
+        # Extract playlist ID from various URL formats
+        playlist_id = None
+
+        # Pattern 1: https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID
+        match = re.search(r'[&?]list=([a-zA-Z0-9_-]+)', url)
+        if match:
+            playlist_id = match.group(1)
+
+        # Pattern 2: https://www.youtube.com/playlist?list=PLAYLIST_ID
+        elif 'playlist?list=' in url:
+            match = re.search(r'playlist\?list=([a-zA-Z0-9_-]+)', url)
+            if match:
+                playlist_id = match.group(1)
+
+        if playlist_id:
+            return f"https://www.youtube.com/playlist?list={playlist_id}"
+        else:
+            return url  # Return original if no playlist ID found
+
+    def _parse_playlist_thread(self, url):
+        """Thread function to parse playlist information with progressive loading"""
+        try:
+            # Reset playlist data
+            self.playlist_entries = []
+            self.playlist_info = None
+
+            # Clear the listbox first
+            self.root.after(0, lambda: self.playlist_listbox.delete(0, tk.END))
+
+            # Update status to show parsing started
+            self.root.after(0, lambda: self.playlist_title_label.config(text="Connecting to playlist..."))
+
+            ydl_opts = {
+                'quiet': True,  # Disable output for production
+                'no_warnings': True,  # Hide warnings for production
+                'extract_flat': True,  # Only get basic info, don't download
+                'playlistend': 1000,   # Allow up to 1000 videos
+                'ignoreerrors': True,  # Continue on errors
+                'yes_playlist': True,  # Force playlist extraction
+            }
+
+            with YoutubeDL(ydl_opts) as ydl:
+                # Get playlist info first
+                playlist_info = ydl.extract_info(url, download=False)
+                self.playlist_info = playlist_info
+
+                # Update playlist title immediately
+                title = playlist_info.get('title', 'Unknown Playlist')
+                total_count = playlist_info.get('playlist_count', len(playlist_info.get('entries', [])))
+
+                self.root.after(0, lambda: self.playlist_title_label.config(
+                    text=f"Playlist: {title} (Loading... 0/{total_count})"
+                ))
+
+                # Process entries progressively
+                entries = playlist_info.get('entries', [])
+
+                valid_entries = 0
+                for i, entry in enumerate(entries):
+                    if entry and entry.get('id'):  # Skip None entries and entries without ID
+                        self.playlist_entries.append(entry)
+                        valid_entries += 1
+
+                        # Add to GUI immediately
+                        video_title = entry.get('title', entry.get('id', f'Video {valid_entries}'))
+                        duration = entry.get('duration', 0)
+                        duration_str = self.format_duration(duration) if duration else "Unknown"
+
+                        display_text = f"{valid_entries:3d}. {video_title} ({duration_str})"
+
+                        # Update GUI in main thread
+                        self.root.after(0, lambda text=display_text: self.playlist_listbox.insert(tk.END, text))
+
+                        # Update progress every 5 items for small playlists, every 25 for large ones, or at the end
+                        update_interval = 5 if len(entries) <= 100 else 25
+                        if valid_entries % update_interval == 0 or i == len(entries) - 1:
+                            progress_text = f"Playlist: {title} (Loading... {valid_entries}/{total_count})"
+                            self.root.after(0, lambda text=progress_text: self.playlist_title_label.config(text=text))
+
+                # Final update
+                final_count = len(self.playlist_entries)
+                final_text = f"Playlist: {title} ({final_count} videos)"
+
+                self.root.after(0, lambda text=final_text: self.playlist_title_label.config(text=text))
+
+                if final_count > 0:
+                    self.root.after(0, lambda: self.add_selected_to_queue_button.config(state="normal"))
+                else:
+                    self.root.after(0, lambda: self.playlist_title_label.config(text=f"Playlist: {title} (No videos found)"))
+
+                self.root.after(0, lambda: self.parse_playlist_button.config(state="normal"))
+
+        except Exception as e:
+            error_msg = f"Error parsing playlist: {str(e)}"
+            self.root.after(0, lambda: self._show_playlist_parse_error(error_msg))
+            self.root.after(0, lambda: self.parse_playlist_button.config(state="normal"))
+
+    def _show_playlist_parse_error(self, error_msg):
+        """Show playlist parsing error in main thread"""
+        self.playlist_title_label.config(text=error_msg)
+        self.parse_playlist_button.config(state="normal")
+        messagebox.showerror("Parse Error", error_msg)
+
+    def _update_playlist_info(self):
+        """Update GUI with playlist information - now handled progressively in thread"""
+        # This method is now mostly handled in the thread itself
+        # Just re-enable the parse button
+        self.parse_playlist_button.config(state="normal")
+
+    def select_all_playlist_items(self):
+        """Select all items in the playlist"""
+        self.playlist_listbox.selection_set(0, tk.END)
+
+    def select_none_playlist_items(self):
+        """Deselect all items in the playlist"""
+        self.playlist_listbox.selection_clear(0, tk.END)
+
+    def add_selected_playlist_items_to_queue(self):
+        """Add selected playlist items to download queue"""
+        selection = self.playlist_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select videos from the playlist to add to queue.")
+            return
+
+        if not self.playlist_entries:
+            messagebox.showwarning("No Playlist", "Please parse a playlist first.")
+            return
+
+        download_type = self.playlist_download_type.get()
+        quality = self.playlist_quality_var.get()
+
+        added_count = 0
+        for index in selection:
+            if index < len(self.playlist_entries):
+                entry = self.playlist_entries[index]
+
+                # Create queue item for playlist video
+                queue_item = {
+                    'url': entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}",
+                    'title': entry.get('title', f'Video {index+1}'),
+                    'download_type': download_type,
+                    'quality': quality,
+                    'video_info': entry.copy(),
+                    'available_formats': [],  # Will be populated when downloading
+                    'status': 'Queued',
+                    'from_playlist': True,
+                    'playlist_title': self.playlist_info.get('title', 'Unknown Playlist')
+                }
+
+                # Add to queue
+                self.download_queue.append(queue_item)
+                added_count += 1
+
+        if added_count > 0:
+            self.update_queue_display()
+
+            # Check if downloads are currently active and extend the session
+            if self.is_queue_processing:
+                for i in range(added_count):
+                    queue_item = self.download_queue[-(added_count-i)]
+                    self.extend_download_session(queue_item)
+
+            queue_status = f"Added {added_count} videos from playlist to queue. Total items: {len(self.download_queue)}"
+            if self.is_queue_processing:
+                queue_status += " (Download session extended)"
+            self.status_label.config(text=queue_status)
 
     def parse_video(self):
         """Parse the video URL and extract available formats"""
         url = self.url_entry.get().strip()
         if not url:
             messagebox.showwarning("Input Error", "Please enter a YouTube video URL.")
+            return
+
+        # Check if this is a playlist URL
+        if self.is_playlist_url(url):
+            messagebox.showwarning("Playlist URL Detected",
+                                 "This appears to be a playlist URL!\n\n"
+                                 "Please use the 'Playlist' tab to process playlists.\n"
+                                 "The 'Single Video' tab is only for individual video URLs.\n\n"
+                                 "To download just this specific video, remove the '&list=...' "
+                                 "part from the URL.")
+            return
+
+        # Check if it's a valid YouTube video URL
+        if not self.is_youtube_video_url(url):
+            messagebox.showwarning("Invalid URL",
+                                 "Please enter a valid YouTube video URL.\n\n"
+                                 "Supported formats:\n"
+                                 "• https://www.youtube.com/watch?v=VIDEO_ID\n"
+                                 "• https://youtu.be/VIDEO_ID\n"
+                                 "• https://www.youtube.com/embed/VIDEO_ID")
             return
 
         self.parse_button.config(state="disabled")
@@ -655,6 +1014,7 @@ class YouTubeDownloaderApp:
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
+                'no_playlist': True,  # Force single video extraction only
             }
 
             with YoutubeDL(ydl_opts) as ydl:
@@ -667,11 +1027,13 @@ class YouTubeDownloaderApp:
         except Exception as e:
             error_msg = f"Error parsing video: {str(e)}"
             self.root.after(0, lambda: self._show_parse_error(error_msg))
+        finally:
+            # Always re-enable the parse button
+            self.root.after(0, lambda: self.parse_button.config(state="normal"))
 
     def _show_parse_error(self, error_msg):
         """Show parsing error in main thread"""
         self.status_label.config(text=error_msg)
-        self.parse_button.config(state="normal")
         messagebox.showerror("Parse Error", error_msg)
 
     def format_duration(self, seconds):
@@ -833,8 +1195,6 @@ class YouTubeDownloaderApp:
             self.start_single_button.config(state="normal")
             self.add_to_queue_button.config(state="normal")
             self.status_label.config(text="Video parsed successfully. Select format and quality, then add to queue or download.")
-
-        self.parse_button.config(state="normal")
 
     def add_to_queue(self):
         """Add current video to download queue"""

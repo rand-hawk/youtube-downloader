@@ -4,8 +4,8 @@ import shutil
 import urllib.request
 import zipfile
 
-SCRIPT_NAME = "youtube-download-gui-v1.py"
-EXE_NAME = "youtube-downloader-v1.0"
+SCRIPT_NAME = "youtube-download-gui-modern.py"
+EXE_NAME = "youtube-downloader-v2.0-portable"
 ICON_FILE = "youtube-downloader.ico"
 CONFIG_FILE = "config.json"
 IMAGE_FILE = "youtube-downloader-icon.png"
@@ -81,10 +81,14 @@ a = Analysis(
         ('{ICON_FILE}', '.'),
         ('{CONFIG_FILE}', '.'),
         ('{IMAGE_FILE}', '.'),
-        ('{FFMPEG_DIR}/ffmpeg.exe', 'ffmpeg'),
-        ('{FFMPEG_DIR}/ffprobe.exe', 'ffmpeg'),
+        ('{FFMPEG_DIR}', 'ffmpeg'),
     ],
     hiddenimports=[
+        # CustomTkinter and modern UI
+        'customtkinter',
+        'darkdetect',
+        'packaging',
+
         # Core yt-dlp modules
         'yt_dlp',
         'yt_dlp.YoutubeDL',
@@ -199,8 +203,12 @@ def build_exe():
     # Create spec file for better control
     create_spec_file()
 
+    # Use the virtual environment's PyInstaller
+    import sys
+    venv_python = sys.executable
+
     pyinstaller_cmd = [
-        "pyinstaller",
+        venv_python, "-m", "PyInstaller",
         "--clean",
         "--noconfirm",
         "youtube-downloader.spec"
@@ -218,7 +226,7 @@ def create_inno_script():
     inno_script = f"""
 [Setup]
 AppName=YouTube Downloader
-AppVersion=1.0
+AppVersion=2.0
 AppPublisher=YouTube Downloader Team
 AppPublisherURL=https://github.com/rand-hawk/youtube-downloader
 AppSupportURL=https://github.com/rand-hawk/youtube-downloader/issues
@@ -233,11 +241,11 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-UninstallDisplayName=YouTube Downloader
+UninstallDisplayName=YouTube Downloader v2.0
 UninstallDisplayIcon={{app}}\\youtube-downloader.ico
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=2.0.0.0
 VersionInfoCompany=YouTube Downloader Team
-VersionInfoDescription=Professional YouTube Video Downloader
+VersionInfoDescription=Professional YouTube Video Downloader with Modern UI
 VersionInfoCopyright=Copyright (C) 2025 YouTube Downloader Team
 
 [Tasks]

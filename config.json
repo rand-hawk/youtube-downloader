@@ -1,4 +1,5 @@
 {
     "output_dir": "C:/YouTube Downloader/downloaded_media",
-    "ffmpeg_path": "C:/ffmpeg/bin"
+    "ffmpeg_path": "C:/ffmpeg/bin",
+    "theme": "dark"
 }
