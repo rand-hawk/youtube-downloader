@@ -22,6 +22,18 @@ except ImportError:
     print("yt-dlp not found. Please install it with: pip install yt-dlp")
     exit(1)
 
+class InterruptibleYoutubeDL(YoutubeDL):
+    """Custom YoutubeDL class that can be interrupted using threading events"""
+    def __init__(self, stop_event, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stop_event = stop_event
+
+    def process_info(self, info_dict):
+        """Override to check for interruption"""
+        if self.stop_event.is_set():
+            raise KeyboardInterrupt("Download interrupted by user")
+        return super().process_info(info_dict)
+
 # Import PIL for thumbnails
 try:
     from PIL import Image, ImageTk
@@ -117,7 +129,13 @@ class ModernYouTubeDownloader:
         self.download_executor = ThreadPoolExecutor(max_workers=self.max_concurrent_downloads)
         self.active_downloads = {}
         self.download_start_time = None
-        
+
+        # Stop control for downloads
+        self.cancel_requested = False
+        self.download_stop_event = threading.Event()
+        self.stop_events = []
+        self.active_download_processes = []
+
         # Create output directory
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -816,9 +834,22 @@ class ModernYouTubeDownloader:
             messagebox.showinfo("Empty Queue", "No items in download queue.")
             return
 
+        # Reset stop control
+        self.cancel_requested = False
+        self.download_stop_event.clear()
+
+        # Reset any stopped items back to queued for resume functionality
+        for item in self.download_queue:
+            if item['status'] == 'Stopped':
+                item['status'] = 'Queued'
+                print(f"Resuming download: {item['title']}")
+
         self.is_queue_processing = True
         self.start_queue_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
+
+        # Update display to show resumed items
+        self.update_queue_display()
 
         # Start downloading items
         threading.Thread(target=self._process_queue, daemon=True).start()
@@ -827,14 +858,15 @@ class ModernYouTubeDownloader:
         """Process download queue"""
         try:
             for i, item in enumerate(self.download_queue):
-                if not self.is_queue_processing:  # Check if stopped
+                if not self.is_queue_processing or self.cancel_requested:  # Check if stopped
                     break
 
-                if item['status'] == 'Queued':
+                # Process items that are queued or stopped (for resume functionality)
+                if item['status'] in ['Queued', 'Stopped']:
                     self.download_single_item(i)
 
                     # Wait for this item to complete before starting next
-                    while item['status'] == 'Downloading' and self.is_queue_processing:
+                    while item['status'] == 'Downloading' and self.is_queue_processing and not self.cancel_requested:
                         threading.Event().wait(0.5)  # Small delay
 
         except Exception as e:
@@ -979,14 +1011,38 @@ class ModernYouTubeDownloader:
             print(f"Format: {ydl_opts.get('format', 'default')}")
             print(f"Output: {output_template}")
 
-            # Download the video/audio
-            with YoutubeDL(ydl_opts) as ydl:
+            # Create stop event for this download
+            stop_event = threading.Event()
+            self.stop_events.append(stop_event)
+
+            # Download the video/audio with interruptible downloader
+            ydl = InterruptibleYoutubeDL(stop_event, ydl_opts)
+            self.active_download_processes.append(ydl)
+
+            try:
+                # Check if already cancelled before starting
+                if self.cancel_requested or self.download_stop_event.is_set():
+                    return
+
                 ydl.download([url])
 
-            # Update status to completed
-            item['status'] = 'Completed'
+                # Update status to completed
+                item['status'] = 'Completed'
+                self.root.after(0, lambda: self.update_queue_display())
+                self.root.after(0, lambda: self.status_label.configure(text=f"Downloaded: {item['title']}"))
+
+            finally:
+                # Remove from active processes
+                if ydl in self.active_download_processes:
+                    self.active_download_processes.remove(ydl)
+                if stop_event in self.stop_events:
+                    self.stop_events.remove(stop_event)
+
+        except KeyboardInterrupt:
+            print(f"Download interrupted by user: {item['title']}")
+            item['status'] = 'Stopped'
             self.root.after(0, lambda: self.update_queue_display())
-            self.root.after(0, lambda: self.status_label.configure(text=f"Downloaded: {item['title']}"))
+            self.root.after(0, lambda: self.status_label.configure(text=f"Download stopped: {item['title']}"))
 
         except Exception as e:
             item['status'] = 'Error'
@@ -1060,6 +1116,10 @@ class ModernYouTubeDownloader:
     def progress_hook(self, d):
         """Progress hook for yt-dlp downloads"""
         try:
+            # Check for cancellation first
+            if self.cancel_requested or self.download_stop_event.is_set():
+                raise KeyboardInterrupt("Download cancelled by user")
+
             if d['status'] == 'downloading':
                 # Calculate progress percentage
                 if 'total_bytes' in d and d['total_bytes']:
@@ -1145,11 +1205,28 @@ class ModernYouTubeDownloader:
             self.root.after(0, lambda: self.status_label.configure(text=f"Conversion error: {str(e)}"))
 
     def stop_download(self):
-        """Stop current downloads"""
-        self.is_queue_processing = False
+        """Stop current download or queue processing and interrupt all active processes"""
+        self.cancel_requested = True
+
+        # Set the global stop event to interrupt all downloads
+        self.download_stop_event.set()
+
+        # Set all individual stop events
+        for stop_event in self.stop_events:
+            stop_event.set()
+
+        # Stop queue processing
+        if self.is_queue_processing:
+            self.is_queue_processing = False
+            self.status_label.configure(text="Stopping queue...")
+        else:
+            self.status_label.configure(text="Stopping download...")
+
+        # Update button states
         self.start_queue_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
-        self.status_label.configure(text="Downloads stopped.")
+
+        print("Stop requested - interrupting all active downloads")
 
     def check_clipboard(self):
         """Check clipboard for YouTube URLs"""
