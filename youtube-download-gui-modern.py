@@ -82,9 +82,9 @@ class ModernYouTubeDownloader:
     def __init__(self):
         # Initialize main window
         self.root = ctk.CTk()
-        self.root.title("🎬 YouTube Downloader v2.0")
-        self.root.geometry("1000x900")
-        self.root.minsize(800, 800)
+        self.root.title("🎬 YouTube Downloader v2.1")
+        self.root.geometry("950x720")
+        self.root.minsize(900, 650)
         
         # Set window icon
         try:
@@ -173,24 +173,24 @@ class ModernYouTubeDownloader:
 
     def setup_header(self):
         """Setup the header with title and controls"""
-        header_frame = ctk.CTkFrame(self.root, height=60, corner_radius=0)
+        header_frame = ctk.CTkFrame(self.root, height=45, corner_radius=0)
         header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
         header_frame.grid_columnconfigure(1, weight=1)
-        
+
         # App title with icon
         title_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_frame.grid(row=0, column=0, sticky="w", padx=20, pady=15)
+        title_frame.grid(row=0, column=0, sticky="w", padx=15, pady=8)
         
         title_label = ctk.CTkLabel(
             title_frame,
-            text="🎬 YouTube Downloader v2.0",
-            font=ctk.CTkFont(size=20, weight="bold")
+            text="🎬 YouTube Downloader v2.1",
+            font=ctk.CTkFont(size=16, weight="bold")
         )
         title_label.pack(side="left")
-        
+
         # Header controls
         controls_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        controls_frame.grid(row=0, column=2, sticky="e", padx=20, pady=15)
+        controls_frame.grid(row=0, column=2, sticky="e", padx=15, pady=8)
         
         # Theme toggle button
         # Set initial icon based on current theme
@@ -200,33 +200,33 @@ class ModernYouTubeDownloader:
         self.theme_button = ctk.CTkButton(
             controls_frame,
             text=initial_icon,
-            width=40,
-            height=30,
+            width=35,
+            height=25,
             command=self.toggle_theme
         )
-        self.theme_button.pack(side="right", padx=5)
-        
+        self.theme_button.pack(side="right", padx=3)
+
         # Settings button
         settings_button = ctk.CTkButton(
             controls_frame,
             text="⚙️",
-            width=40,
-            height=30,
+            width=35,
+            height=25,
             command=self.open_settings
         )
-        settings_button.pack(side="right", padx=5)
+        settings_button.pack(side="right", padx=3)
 
     def setup_main_content(self):
         """Setup the main content area with tabs"""
         # Main container
         main_frame = ctk.CTkFrame(self.root, corner_radius=10)
-        main_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+        main_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=5)
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_rowconfigure(1, weight=1)
-        
+
         # Tab view
-        self.tabview = ctk.CTkTabview(main_frame, height=450)
-        self.tabview.grid(row=0, column=0, sticky="ew", padx=20, pady=20)
+        self.tabview = ctk.CTkTabview(main_frame, height=350)
+        self.tabview.grid(row=0, column=0, sticky="ew", padx=15, pady=10)
         
         # Add tabs
         self.tabview.add("📹 Single Video")
@@ -248,32 +248,32 @@ class ModernYouTubeDownloader:
         
         # URL input section
         url_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        url_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=10)
+        url_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=8)
         url_frame.grid_columnconfigure(0, weight=1)
-        
-        url_label = ctk.CTkLabel(url_frame, text="YouTube Video URL:", font=ctk.CTkFont(size=14, weight="bold"))
-        url_label.grid(row=0, column=0, sticky="w", pady=(0, 5))
-        
+
+        url_label = ctk.CTkLabel(url_frame, text="YouTube Video URL:", font=ctk.CTkFont(size=13, weight="bold"))
+        url_label.grid(row=0, column=0, sticky="w", pady=(0, 3))
+
         # URL input with parse button
         url_input_frame = ctk.CTkFrame(url_frame, fg_color="transparent")
-        url_input_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        url_input_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         url_input_frame.grid_columnconfigure(0, weight=1)
-        
+
         self.url_entry = ctk.CTkEntry(
-            url_input_frame, 
+            url_input_frame,
             placeholder_text="Paste YouTube video URL here...",
-            height=40,
-            font=ctk.CTkFont(size=12)
+            height=35,
+            font=ctk.CTkFont(size=11)
         )
-        self.url_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        
+        self.url_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
         self.parse_button = ctk.CTkButton(
             url_input_frame,
             text="🔍 Parse",
-            width=100,
-            height=40,
+            width=90,
+            height=35,
             command=self.parse_video,
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=ctk.CTkFont(size=11, weight="bold")
         )
         self.parse_button.grid(row=0, column=1)
         
@@ -283,84 +283,84 @@ class ModernYouTubeDownloader:
     def setup_video_info_section(self, parent):
         """Setup the video information display section"""
         info_frame = ctk.CTkFrame(parent)
-        info_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
+        info_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=8)
         info_frame.grid_columnconfigure(1, weight=1)
-        
+
         # Thumbnail frame
-        self.thumbnail_frame = ctk.CTkFrame(info_frame, width=160, height=120)
-        self.thumbnail_frame.grid(row=0, column=0, sticky="nw", padx=20, pady=20)
+        self.thumbnail_frame = ctk.CTkFrame(info_frame, width=140, height=100)
+        self.thumbnail_frame.grid(row=0, column=0, sticky="nw", padx=15, pady=15)
         self.thumbnail_frame.grid_propagate(False)
-        
+
         self.thumbnail_label = ctk.CTkLabel(
-            self.thumbnail_frame, 
+            self.thumbnail_frame,
             text="📹\nThumbnail",
-            font=ctk.CTkFont(size=12)
+            font=ctk.CTkFont(size=11)
         )
         self.thumbnail_label.pack(expand=True)
-        
+
         # Video details frame
         details_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
-        details_frame.grid(row=0, column=1, sticky="ew", padx=20, pady=20)
+        details_frame.grid(row=0, column=1, sticky="ew", padx=15, pady=15)
         details_frame.grid_columnconfigure(0, weight=1)
         
         self.video_title_label = ctk.CTkLabel(
-            details_frame, 
+            details_frame,
             text="",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            wraplength=400,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            wraplength=350,
             justify="left"
         )
-        self.video_title_label.grid(row=0, column=0, sticky="w", pady=(0, 10))
-        
+        self.video_title_label.grid(row=0, column=0, sticky="w", pady=(0, 8))
+
         # Format and quality selection
         format_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
-        format_frame.grid(row=1, column=0, sticky="ew", pady=10)
+        format_frame.grid(row=1, column=0, sticky="ew", pady=8)
         
         # Download format selection
-        format_label = ctk.CTkLabel(format_frame, text="Format:", font=ctk.CTkFont(size=12, weight="bold"))
-        format_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
-        
+        format_label = ctk.CTkLabel(format_frame, text="Format:", font=ctk.CTkFont(size=11, weight="bold"))
+        format_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+
         self.download_type = ctk.StringVar(value="mp4")
         format_mp4 = ctk.CTkRadioButton(format_frame, text="MP4 Video", variable=self.download_type, value="mp4")
-        format_mp4.grid(row=0, column=1, padx=10)
-        
+        format_mp4.grid(row=0, column=1, padx=8)
+
         format_mp3 = ctk.CTkRadioButton(format_frame, text="MP3 Audio", variable=self.download_type, value="mp3")
-        format_mp3.grid(row=0, column=2, padx=10)
-        
+        format_mp3.grid(row=0, column=2, padx=8)
+
         # Quality selection
-        quality_label = ctk.CTkLabel(format_frame, text="Quality:", font=ctk.CTkFont(size=12, weight="bold"))
-        quality_label.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
-        
+        quality_label = ctk.CTkLabel(format_frame, text="Quality:", font=ctk.CTkFont(size=11, weight="bold"))
+        quality_label.grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
+
         self.quality_var = ctk.StringVar(value="144")
         self.quality_menu = ctk.CTkOptionMenu(
             format_frame,
             variable=self.quality_var,
             values=["144", "240", "360", "480", "720", "1080", "best"],
-            width=120
+            width=110
         )
-        self.quality_menu.grid(row=1, column=1, sticky="w", pady=(10, 0))
-        
+        self.quality_menu.grid(row=1, column=1, sticky="w", pady=(8, 0))
+
         # Action buttons
         button_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
-        button_frame.grid(row=2, column=0, sticky="ew", pady=20)
+        button_frame.grid(row=2, column=0, sticky="ew", pady=15)
         
         self.add_to_queue_button = ctk.CTkButton(
             button_frame,
             text="➕ Add to Queue",
             command=self.add_to_queue,
             state="disabled",
-            width=140,
-            height=35
+            width=130,
+            height=30
         )
-        self.add_to_queue_button.grid(row=0, column=0, padx=(0, 10))
-        
+        self.add_to_queue_button.grid(row=0, column=0, padx=(0, 8))
+
         self.download_now_button = ctk.CTkButton(
             button_frame,
             text="⬇️ Download Now",
             command=self.start_download,
             state="disabled",
-            width=140,
-            height=35
+            width=130,
+            height=30
         )
         self.download_now_button.grid(row=0, column=1)
 
@@ -515,111 +515,111 @@ class ModernYouTubeDownloader:
         """Setup the download queue section"""
         # Queue frame
         queue_frame = ctk.CTkFrame(parent)
-        queue_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        queue_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
         queue_frame.grid_columnconfigure(0, weight=1)
         queue_frame.grid_rowconfigure(1, weight=1)
-        
+
         # Queue header
         queue_header = ctk.CTkFrame(queue_frame, fg_color="transparent")
-        queue_header.grid(row=0, column=0, sticky="ew", padx=20, pady=10)
+        queue_header.grid(row=0, column=0, sticky="ew", padx=15, pady=8)
         queue_header.grid_columnconfigure(0, weight=1)
         
         queue_title = ctk.CTkLabel(
-            queue_header, 
-            text="📥 Download Queue", 
-            font=ctk.CTkFont(size=16, weight="bold")
+            queue_header,
+            text="📥 Download Queue",
+            font=ctk.CTkFont(size=14, weight="bold")
         )
         queue_title.grid(row=0, column=0, sticky="w")
-        
+
         clear_button = ctk.CTkButton(
             queue_header,
             text="🗑️ Clear",
-            width=80,
-            height=30,
+            width=70,
+            height=25,
             command=self.clear_queue
         )
         clear_button.grid(row=0, column=1, sticky="e")
-        
+
         # Queue listbox (using tkinter Listbox for now, will enhance later)
         self.queue_listbox = tk.Listbox(
             queue_frame,
-            height=10,
-            font=("Consolas", 10),
+            height=8,
+            font=("Consolas", 9),
             bg="#212121",
             fg="#ffffff",
             selectbackground="#1f538d",
             relief="flat",
             borderwidth=0
         )
-        self.queue_listbox.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self.queue_listbox.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 8))
 
     def setup_footer(self):
         """Setup the footer with progress and controls"""
-        footer_frame = ctk.CTkFrame(self.root, height=120, corner_radius=0)
+        footer_frame = ctk.CTkFrame(self.root, height=100, corner_radius=0)
         footer_frame.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
         footer_frame.grid_columnconfigure(0, weight=1)
-        
+
         # Progress section
         progress_frame = ctk.CTkFrame(footer_frame, fg_color="transparent")
-        progress_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=10)
+        progress_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=8)
         progress_frame.grid_columnconfigure(0, weight=1)
         
         # Progress info
         progress_info = ctk.CTkFrame(progress_frame, fg_color="transparent")
-        progress_info.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        progress_info.grid(row=0, column=0, sticky="ew", pady=(0, 3))
         progress_info.grid_columnconfigure(1, weight=1)
-        
-        progress_label = ctk.CTkLabel(progress_info, text="Progress:", font=ctk.CTkFont(size=12, weight="bold"))
+
+        progress_label = ctk.CTkLabel(progress_info, text="Progress:", font=ctk.CTkFont(size=11, weight="bold"))
         progress_label.grid(row=0, column=0, sticky="w")
-        
-        self.speed_label = ctk.CTkLabel(progress_info, text="", font=ctk.CTkFont(size=12))
+
+        self.speed_label = ctk.CTkLabel(progress_info, text="", font=ctk.CTkFont(size=11))
         self.speed_label.grid(row=0, column=2, sticky="e")
-        
+
         # Progress bar
-        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=20)
-        self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=16)
+        self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         self.progress_bar.set(0)
-        
+
         # Control buttons
         controls_frame = ctk.CTkFrame(progress_frame, fg_color="transparent")
-        controls_frame.grid(row=2, column=0, pady=5)
+        controls_frame.grid(row=2, column=0, pady=3)
         
         self.start_queue_button = ctk.CTkButton(
             controls_frame,
             text="▶️ Start Queue",
             command=self.start_queue_download,
-            width=120,
-            height=35
+            width=110,
+            height=30
         )
-        self.start_queue_button.pack(side="left", padx=5)
-        
+        self.start_queue_button.pack(side="left", padx=4)
+
         self.stop_button = ctk.CTkButton(
             controls_frame,
             text="⏹️ Stop",
             command=self.stop_download,
             state="disabled",
-            width=80,
-            height=35
+            width=70,
+            height=30
         )
-        self.stop_button.pack(side="left", padx=5)
+        self.stop_button.pack(side="left", padx=4)
 
         # Open folder button
         self.open_folder_button = ctk.CTkButton(
             controls_frame,
             text="📁 Open Downloads",
             command=self.open_download_folder,
-            width=140,
-            height=35
+            width=120,
+            height=30
         )
-        self.open_folder_button.pack(side="left", padx=5)
+        self.open_folder_button.pack(side="left", padx=4)
 
         # Status label
         self.status_label = ctk.CTkLabel(
             footer_frame,
             text="Enter a YouTube URL and click 'Parse' to begin",
-            font=ctk.CTkFont(size=12)
+            font=ctk.CTkFont(size=11)
         )
-        self.status_label.grid(row=1, column=0, pady=(0, 10))
+        self.status_label.grid(row=1, column=0, pady=(0, 8))
 
     def toggle_theme(self):
         """Toggle between dark and light themes"""
@@ -1377,8 +1377,8 @@ class ModernYouTubeDownloader:
     def open_settings_dialog(self):
         """Open settings dialog window"""
         settings_window = ctk.CTkToplevel(self.root)
-        settings_window.title("⚙️ YouTube Downloader v2.0 - Settings")
-        settings_window.geometry("500x400")
+        settings_window.title("⚙️ YouTube Downloader v2.1 - Settings")
+        settings_window.geometry("450x350")
         settings_window.transient(self.root)
         settings_window.grab_set()
 
