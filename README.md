@@ -1,8 +1,16 @@
-# YouTube Downloader v2.0
+# YouTube Downloader v2.1
 
-A professional YouTube video and audio downloader with a modern CustomTkinter GUI interface.
+A professional YouTube video and audio downloader with a modern CustomTkinter GUI interface, optimized for lower resolution screens.
 
-## 🎉 What's New in v2.0
+## 🆕 What's New in v2.1
+
+- **Optimized Layout**: Redesigned for 1024x768 and lower resolution displays
+- **Compact Design**: Reduced window size from 1000x900 to 950x720 pixels
+- **Space Efficient**: Tighter spacing, smaller fonts, and optimized component sizes
+- **Better Laptop Support**: Perfect for 13", 14", and 15" laptop screens
+- **Preserved Functionality**: All v2.0 features maintained with improved space utilization
+
+## 🎉 Core Features (v2.0 Foundation)
 
 - **Modern UI**: Complete redesign with CustomTkinter for a sleek, modern interface
 - **Enhanced Filenames**: Videos saved with format: `"Title [Quality] [VideoID].ext"`
@@ -13,7 +21,7 @@ A professional YouTube video and audio downloader with a modern CustomTkinter GU
 
 ## ✨ Features
 
-- **Modern Interface**: Dark/light theme support with CustomTkinter
+- **Optimized Interface**: Compact layout perfect for 1024x768+ screens with dark/light themes
 - **Multiple Formats**: Download videos (144p to 4K) or extract audio as MP3
 - **Smart Queue System**: Add multiple videos with individual quality selection
 - **Resume Downloads**: Automatic resume for interrupted downloads with .part files
@@ -22,6 +30,7 @@ A professional YouTube video and audio downloader with a modern CustomTkinter GU
 - **Built-in FFmpeg**: Integrated video/audio processing (no separate installation needed)
 - **Clipboard Monitoring**: Automatic URL detection from clipboard
 - **Professional Distribution**: Both portable executable and installer available
+- **Lower Resolution Support**: Optimized for laptops, netbooks, and smaller monitors
 
 ## 📁 Project Structure
 
@@ -30,7 +39,7 @@ youtube-download/
 ├── 📄 README.md                                    # Project documentation
 ├── 📄 RELEASE_NOTES_v1.0.md                       # Release notes
 ├── 🐍 youtube-download-gui-v1.py                  # Original working version (v1.0)
-├── 🐍 youtube-download-gui-modern.py              # Modern version (v2.0) - Main source
+├── 🐍 youtube-download-gui-modern.py              # Modern version (v2.1) - Main source
 ├── 🔧 build-youtube-downloader.py                 # Build script for both versions
 ├── 📄 config.json                                 # Default application configuration
 ├── 📄 youtube-downloader.spec                     # PyInstaller specification file
@@ -40,9 +49,9 @@ youtube-download/
 │   ├── ffmpeg.exe                                 # FFmpeg executable
 │   └── ffprobe.exe                                # FFprobe executable
 ├── 📂 dist/                                       # Distribution files
-│   ├── youtube-downloader-v2.0-portable.exe      # Portable executable
+│   ├── youtube-downloader-v2.1-portable.exe      # Portable executable
 │   ├── README.txt                                 # User documentation
-│   └── YouTube-Downloader-v2.0-Portable.zip      # Portable package
+│   └── YouTube-Downloader-v2.1-Portable.zip      # Portable package
 ├── 📂 installer/                                  # Installer package
 │   └── youtube-downloader-installer.exe          # Professional installer
 ├── 📂 build/                                      # Build artifacts (auto-generated)
@@ -75,14 +84,14 @@ youtube-download/
    ```
 
 4. **Build outputs**:
-   - Portable executable: `dist/youtube-downloader-v2.0-portable.exe`
+   - Portable executable: `dist/youtube-downloader-v2.1-portable.exe`
    - Professional installer: `installer/youtube-downloader-installer.exe`
 
 ## 📦 Installation Options
 
 ### Option 1: Portable Version (Recommended for Testing)
-- Download `YouTube-Downloader-v2.0-Portable.zip` from releases
-- Extract and run `youtube-downloader-v2.0-portable.exe`
+- Download `YouTube-Downloader-v2.1-Portable.zip` from releases
+- Extract and run `youtube-downloader-v2.1-portable.exe`
 - No installation required - completely portable
 
 ### Option 2: Professional Installer (Recommended for Regular Use)
@@ -94,6 +103,7 @@ youtube-download/
 ## 💻 System Requirements
 
 - **OS**: Windows 10/11 (64-bit)
+- **Screen Resolution**: 1024x768 or higher (optimized for lower resolutions)
 - **RAM**: 4GB minimum, 8GB recommended
 - **Storage**: 200MB for application + space for downloads
 - **Network**: Internet connection for downloads
@@ -114,9 +124,12 @@ youtube-download/
 - **No audio in video**: Ensure FFmpeg is properly bundled (automatic in releases)
 - **Permission errors**: Run as administrator or change download directory
 - **Antivirus warnings**: Add exception for the executable (false positive)
+- **Interface too large**: v2.1 is optimized for 1024x768+ screens; use scroll wheel if needed
+- **Text too small**: Interface is optimized for space efficiency while maintaining readability
 
 ## 📝 Version History
 
+- **v2.1**: Optimized layout for lower resolution screens (1024x768+), compact design
 - **v2.0**: Modern CustomTkinter UI, enhanced filenames, improved stability
 - **v1.0**: Initial release with basic functionality
 
