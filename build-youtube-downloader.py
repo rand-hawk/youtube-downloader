@@ -5,7 +5,7 @@ import urllib.request
 import zipfile
 
 SCRIPT_NAME = "youtube-download-gui-modern.py"
-EXE_NAME = "youtube-downloader-v2.1-portable"
+EXE_NAME = "youtube-downloader-v2.2-portable"
 ICON_FILE = "youtube-downloader.ico"
 CONFIG_FILE = "config.json"
 IMAGE_FILE = "youtube-downloader-icon.png"
@@ -226,7 +226,7 @@ def create_inno_script():
     inno_script = f"""
 [Setup]
 AppName=YouTube Downloader
-AppVersion=2.1
+AppVersion=2.2
 AppPublisher=YouTube Downloader Team
 AppPublisherURL=https://github.com/rand-hawk/youtube-downloader
 AppSupportURL=https://github.com/rand-hawk/youtube-downloader/issues
@@ -241,9 +241,9 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-UninstallDisplayName=YouTube Downloader v2.1
+UninstallDisplayName=YouTube Downloader v2.2
 UninstallDisplayIcon={{app}}\\youtube-downloader.ico
-VersionInfoVersion=2.1.0.0
+VersionInfoVersion=2.2.0.0
 VersionInfoCompany=YouTube Downloader Team
 VersionInfoDescription=Professional YouTube Video Downloader with Modern UI
 VersionInfoCopyright=Copyright (C) 2025 YouTube Downloader Team

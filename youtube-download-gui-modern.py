@@ -43,6 +43,11 @@ class InterruptibleYoutubeDL(YoutubeDL):
             raise KeyboardInterrupt("Download interrupted by user")
         return super().process_info(info_dict)
 
+
+# Fallback player clients used to bypass YouTube SABR enforcement on some videos.
+YOUTUBE_PLAYER_CLIENTS = ['default', 'android_vr']
+YOUTUBE_EXTRACTOR_ARGS = {'youtube': {'player_client': YOUTUBE_PLAYER_CLIENTS}}
+
 # Import PIL for thumbnails
 try:
     from PIL import Image, ImageTk
@@ -706,6 +711,7 @@ class ModernYouTubeDownloader:
                 'no_warnings': True,
                 'extract_flat': False,
                 'no_playlist': True,
+                'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
             }
 
             with YoutubeDL(ydl_opts) as ydl:
@@ -716,11 +722,36 @@ class ModernYouTubeDownloader:
                 self.root.after(0, self._update_video_info)
 
         except Exception as e:
-            error_msg = f"Error parsing video: {str(e)}"
+            error_msg = self._friendly_parse_error(e)
             self.root.after(0, lambda: self._show_parse_error(error_msg))
         finally:
             # Always re-enable the parse button
             self.root.after(0, lambda: self.parse_button.configure(state="normal", text="🔍 Parse"))
+
+    def _friendly_parse_error(self, exc):
+        """Translate common yt-dlp errors into actionable messages."""
+        raw = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', str(exc)).strip()
+        low = raw.lower()
+        if 'requested format is not available' in low:
+            return ("YouTube did not return any downloadable formats for this video.\n\n"
+                    "This is usually caused by an outdated yt-dlp. Please update it:\n"
+                    "    pip install -U yt-dlp\n\n"
+                    f"Details: {raw}")
+        if 'page needs to be reloaded' in low or 'sabr' in low:
+            return ("YouTube is forcing SABR streaming for this video and yt-dlp "
+                    "cannot extract it without a PO token.\n\n"
+                    "Try updating yt-dlp (pip install -U yt-dlp). If it still fails, "
+                    "this specific video may currently be unsupported. "
+                    "See https://github.com/yt-dlp/yt-dlp/issues/12482\n\n"
+                    f"Details: {raw}")
+        if 'sign in to confirm' in low or 'age' in low and 'restrict' in low:
+            return ("This video is age-restricted and requires signing in.\n\n"
+                    f"Details: {raw}")
+        if 'private video' in low:
+            return f"This video is private and cannot be downloaded.\n\nDetails: {raw}"
+        if 'video unavailable' in low:
+            return f"This video is unavailable.\n\nDetails: {raw}"
+        return f"Error parsing video: {raw}"
 
     def _update_video_info(self):
         """Update GUI with video information"""
@@ -987,7 +1018,8 @@ class ModernYouTubeDownloader:
                 "part": True,  # Create .part files for resuming
                 "mtime": True,  # Preserve modification time
                 "quiet": True,  # Reduce output for stability
-                "no_warnings": True
+                "no_warnings": True,
+                "extractor_args": YOUTUBE_EXTRACTOR_ARGS,
             }
 
             print(f"FFmpeg found at: {ffmpeg_path}")
@@ -1349,10 +1381,16 @@ class ModernYouTubeDownloader:
         if self.is_playlist_url(url):
             return False
 
+        # Accept common YouTube single-video URL shapes. Query strings after
+        # the video id (e.g. ?si=..., ?t=..., &feature=...) are permitted so
+        # long as they do not contain a playlist list= parameter.
         video_patterns = [
-            r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+(?:&(?!list=)[\w=&-]*)*$',
-            r'(?:https?://)?(?:www\.)?youtu\.be/[\w-]+(?:\?(?!list=)[\w=&-]*)*$',
-            r'(?:https?://)?(?:www\.)?youtube\.com/embed/[\w-]+(?:\?(?!list=)[\w=&-]*)*$',
+            r'(?:https?://)?(?:www\.|m\.)?youtube\.com/watch\?v=[\w-]+(?:&(?!list=)[\w=%.&-]*)*$',
+            r'(?:https?://)?(?:www\.)?youtu\.be/[\w-]+(?:\?(?!list=)[\w=%.&-]*)*$',
+            r'(?:https?://)?(?:www\.|m\.)?youtube\.com/embed/[\w-]+(?:\?(?!list=)[\w=%.&-]*)*$',
+            r'(?:https?://)?(?:www\.|m\.)?youtube\.com/live/[\w-]+(?:\?(?!list=)[\w=%.&-]*)*$',
+            r'(?:https?://)?(?:www\.|m\.)?youtube\.com/shorts/[\w-]+(?:\?(?!list=)[\w=%.&-]*)*$',
+            r'(?:https?://)?(?:www\.|m\.)?youtube\.com/v/[\w-]+(?:\?(?!list=)[\w=%.&-]*)*$',
         ]
 
         for pattern in video_patterns:
@@ -1505,6 +1543,7 @@ class ModernYouTubeDownloader:
                 'playlistend': 1000,
                 'ignoreerrors': True,
                 'yes_playlist': True,
+                'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
             }
 
             with YoutubeDL(ydl_opts) as ydl:

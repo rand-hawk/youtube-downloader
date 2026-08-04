@@ -1,14 +1,13 @@
-# YouTube Downloader v2.1
+# YouTube Downloader v2.2
 
 A professional YouTube video and audio downloader with a modern CustomTkinter GUI interface, optimized for lower resolution screens.
 
-## 🆕 What's New in v2.1
+## 🆕 What's New in v2.2
 
-- **Optimized Layout**: Redesigned for 1024x768 and lower resolution displays
-- **Compact Design**: Reduced window size from 1000x900 to 950x720 pixels
-- **Space Efficient**: Tighter spacing, smaller fonts, and optimized component sizes
-- **Better Laptop Support**: Perfect for 13", 14", and 15" laptop screens
-- **Preserved Functionality**: All v2.0 features maintained with improved space utilization
+- **Broader URL Support**: Handles Shorts, Live, mobile (`m.youtube.com`), legacy `/v/` and share links with tracking parameters
+- **SABR Workaround**: Uses `default` + `android_vr` player clients to bypass YouTube SABR enforcement that caused `Requested format is not available` errors
+- **Friendly Parse Errors**: Actionable messages for SABR, format, age-restricted, private, and unavailable videos instead of raw tracebacks
+- **Version Metadata Bumped**: Portable EXE renamed to `youtube-downloader-v2.2-portable.exe`; installer version `2.2.0.0`
 
 ## 🎉 Core Features (v2.0 Foundation)
 
@@ -39,7 +38,7 @@ youtube-download/
 ├── 📄 README.md                                    # Project documentation
 ├── 📄 RELEASE_NOTES_v1.0.md                       # Release notes
 ├── 🐍 youtube-download-gui-v1.py                  # Original working version (v1.0)
-├── 🐍 youtube-download-gui-modern.py              # Modern version (v2.1) - Main source
+├── 🐍 youtube-download-gui-modern.py              # Modern version (v2.2) - Main source
 ├── 🔧 build-youtube-downloader.py                 # Build script for both versions
 ├── 📄 config.json                                 # Default application configuration
 ├── 📄 youtube-downloader.spec                     # PyInstaller specification file
@@ -49,9 +48,9 @@ youtube-download/
 │   ├── ffmpeg.exe                                 # FFmpeg executable
 │   └── ffprobe.exe                                # FFprobe executable
 ├── 📂 dist/                                       # Distribution files
-│   ├── youtube-downloader-v2.1-portable.exe      # Portable executable
+│   ├── youtube-downloader-v2.2-portable.exe      # Portable executable
 │   ├── README.txt                                 # User documentation
-│   └── YouTube-Downloader-v2.1-Portable.zip      # Portable package
+│   └── YouTube-Downloader-v2.2-Portable.zip      # Portable package
 ├── 📂 installer/                                  # Installer package
 │   └── youtube-downloader-installer.exe          # Professional installer
 ├── 📂 build/                                      # Build artifacts (auto-generated)
@@ -84,14 +83,14 @@ youtube-download/
    ```
 
 4. **Build outputs**:
-   - Portable executable: `dist/youtube-downloader-v2.1-portable.exe`
+   - Portable executable: `dist/youtube-downloader-v2.2-portable.exe`
    - Professional installer: `installer/youtube-downloader-installer.exe`
 
 ## 📦 Installation Options
 
 ### Option 1: Portable Version (Recommended for Testing)
-- Download `YouTube-Downloader-v2.1-Portable.zip` from releases
-- Extract and run `youtube-downloader-v2.1-portable.exe`
+- Download `YouTube-Downloader-v2.2-Portable.zip` from releases
+- Extract and run `youtube-downloader-v2.2-portable.exe`
 - No installation required - completely portable
 
 ### Option 2: Professional Installer (Recommended for Regular Use)
@@ -124,11 +123,13 @@ youtube-download/
 - **No audio in video**: Ensure FFmpeg is properly bundled (automatic in releases)
 - **Permission errors**: Run as administrator or change download directory
 - **Antivirus warnings**: Add exception for the executable (false positive)
-- **Interface too large**: v2.1 is optimized for 1024x768+ screens; use scroll wheel if needed
+- **Interface too large**: v2.1+ is optimized for 1024x768+ screens; use scroll wheel if needed
 - **Text too small**: Interface is optimized for space efficiency while maintaining readability
+- **`Requested format is not available` / SABR errors**: v2.2 mitigates most cases; if it still fails, update yt-dlp inside the source venv with `pip install -U yt-dlp` and rebuild
 
 ## 📝 Version History
 
+- **v2.2**: Broader URL support (Shorts/Live/mobile), SABR player-client fallback, friendlier parse errors
 - **v2.1**: Optimized layout for lower resolution screens (1024x768+), compact design
 - **v2.0**: Modern CustomTkinter UI, enhanced filenames, improved stability
 - **v1.0**: Initial release with basic functionality
